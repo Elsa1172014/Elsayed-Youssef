@@ -19,6 +19,7 @@ export function fakeDb(opts: { user: { id: string } | null; handler: Handler; rp
       select: () => chain,
       insert: (v: unknown) => ((action = "insert"), (values = v), chain),
       update: (v: unknown) => ((action = "update"), (values = v), chain),
+      upsert: (v: unknown) => ((action = "insert"), (values = v), chain),
       delete: () => ((action = "delete"), chain),
       eq: (k: string, v: unknown) => ((filters[k] = v), chain),
       in: (k: string, v: unknown) => ((filters[k] = v), chain),

@@ -8,6 +8,7 @@ import { chatSchema } from "@/lib/schemas/tutor";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { runTutorTurn, answerToText } from "@/lib/tutor/engine";
 import { appendEvent, applyEvidence, loadHistory, loadTutorContext, sourcesOf } from "@/lib/tutor/persist";
+import { createAssessmentPersistence } from "@/lib/tutor/persist-assessment";
 import { TurnSink } from "@/lib/tutor/tool-core";
 
 export const maxDuration = 60;
@@ -50,7 +51,7 @@ export async function POST(req: Request) {
   try {
     const result = await runTutorTurn({
       model: getTutorModel(),
-      env: { ctx, db, embeddings: getEmbeddings(), sink },
+      env: { ctx, db, embeddings: getEmbeddings(), sink, assessments: createAssessmentPersistence({ db, admin, ctx }) },
       history,
       userText: body.data.text,
       abortSignal: AbortSignal.timeout(50_000),

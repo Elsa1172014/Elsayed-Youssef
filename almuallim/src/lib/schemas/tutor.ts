@@ -33,7 +33,7 @@ export const realtimeTokenSchema = z.object({ sessionId: z.string().uuid() });
 
 export const realtimeToolSchema = z.object({
   sessionId: z.string().uuid(),
-  name: z.enum(["search_textbook", "get_page", "get_lesson_outline", "record_evidence"]),
+  name: z.enum(["search_textbook", "get_page", "get_lesson_outline", "record_evidence", "propose_question", "evaluate_response"]),
   arguments: z.union([z.string().max(4000), z.record(z.string(), z.unknown())]).default("{}"),
   callId: z.string().max(100),
 });

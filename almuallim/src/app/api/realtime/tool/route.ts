@@ -7,6 +7,7 @@ import { getEmbeddings } from "@/lib/providers/models";
 import { realtimeToolSchema } from "@/lib/schemas/tutor";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { applyEvidence, loadTutorContext } from "@/lib/tutor/persist";
+import { createAssessmentPersistence } from "@/lib/tutor/persist-assessment";
 import { executeTool, TurnSink } from "@/lib/tutor/tool-core";
 
 export const maxDuration = 30;
@@ -50,7 +51,7 @@ export async function POST(req: Request) {
 
   const sink = new TurnSink();
   try {
-    const result = await executeTool({ ctx: loaded.ctx, db, embeddings: getEmbeddings(), sink }, body.data.name, args);
+    const result = await executeTool({ ctx: loaded.ctx, db, embeddings: getEmbeddings(), sink, assessments: createAssessmentPersistence({ db, admin, ctx: loaded.ctx }) }, body.data.name, args);
     if (sink.embeddingTokens) await recordUsage(admin, profile.id, "embedding_tokens", sink.embeddingTokens);
     if (sink.evidence.length) await applyEvidence(admin, profile.id, loaded.ctx.lessonId, sink.evidence);
     const output = JSON.stringify(result).slice(0, MAX_OUTPUT_CHARS);

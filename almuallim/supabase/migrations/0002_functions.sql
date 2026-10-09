@@ -62,8 +62,8 @@ begin
     return new;
   end if;
   -- UPDATE
-  if (new.ai_score, new.ai_rubric, new.ai_feedback, new.response_text, new.student_id)
-     is distinct from (old.ai_score, old.ai_rubric, old.ai_feedback, old.response_text, old.student_id) then
+  if (new.ai_score, new.ai_rubric, new.ai_feedback, new.ai_misconception, new.response_text, new.student_id)
+     is distinct from (old.ai_score, old.ai_rubric, old.ai_feedback, old.ai_misconception, old.response_text, old.student_id) then
     raise exception 'immutable response fields' using errcode = '42501';
   end if;
   if (new.teacher_score, new.teacher_feedback, new.teacher_validated_by, new.teacher_validated_at)

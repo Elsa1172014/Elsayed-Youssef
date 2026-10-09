@@ -5,7 +5,7 @@ import { SignOutButton } from "./SignOutButton";
 const NAV: Record<Role, { href: string; label: string }[]> = {
   student: [{ href: "/student", label: "الدرس" }, { href: "/privacy", label: "الخصوصية" }],
   teacher: [{ href: "/teacher", label: "لوحة المعلّم" }, { href: "/student", label: "تجربة الدرس" }, { href: "/privacy", label: "الخصوصية" }],
-  admin: [{ href: "/admin/books", label: "الكتب" }, { href: "/teacher", label: "لوحة المعلّم" }, { href: "/student", label: "تجربة الدرس" }, { href: "/privacy", label: "الخصوصية" }],
+  admin: [{ href: "/admin/books", label: "الكتب" }, { href: "/admin/users", label: "الحسابات" }, { href: "/teacher", label: "لوحة المعلّم" }, { href: "/student", label: "تجربة الدرس" }, { href: "/privacy", label: "الخصوصية" }],
 };
 
 export function AppShell({ role, name, children }: { role: Role; name: string; children: React.ReactNode }) {

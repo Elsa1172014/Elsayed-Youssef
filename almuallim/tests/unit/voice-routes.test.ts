@@ -92,7 +92,7 @@ describe("POST /api/realtime/token", () => {
     const sent = JSON.parse(init.body);
     expect(sent.expires_after).toEqual({ anchor: "created_at", seconds: 120 });
     expect(sent.session).toMatchObject({ type: "realtime", model: "gpt-realtime", audio: { output: { voice: "marin" }, input: { transcription: { language: "ar" } } } });
-    expect(sent.session.tools.map((x: { name: string }) => x.name)).toEqual(["search_textbook", "get_page", "get_lesson_outline", "record_evidence"]);
+    expect(sent.session.tools.map((x: { name: string }) => x.name)).toEqual(["search_textbook", "get_page", "get_lesson_outline", "propose_question", "evaluate_response", "record_evidence"]);
     expect(sent.session.instructions).toContain("المحادثة الصوتية");
     expect(sent.session.instructions).toContain("نص الصفحة الثانية عن الفاعل"); // confirmed page context is injected
     expect(t.evs).toContainEqual({ type: "state", payload: { voice: "started" } });

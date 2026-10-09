@@ -20,3 +20,28 @@ export type CreateBookInput = z.infer<typeof createBookSchema>;
 
 export const ingestSchema = z.object({ force: z.boolean().default(false) });
 export const uuidSchema = z.string().uuid();
+
+export const createClassSchema = z.object({ name: z.string().trim().min(1).max(80), yearGroup: z.number().int().min(7).max(13) });
+
+export const validateResponseSchema = z.object({
+  teacherScore: z.number().min(0).max(100),
+  teacherFeedback: z.string().trim().max(1000).optional(),
+});
+
+export const validateMasterySchema = z.object({
+  studentId: z.string().uuid(),
+  skill: z.enum(["grammar", "vocabulary", "rhetoric", "comprehension", "writing", "reading_aloud"]),
+  lessonId: z.string().uuid().nullable().default(null),
+  value: z.number().min(0).max(1).nullable(), // null clears the validation
+});
+
+export const createUserSchema = z.object({
+  email: z.string().email().max(200),
+  displayName: z.string().trim().max(80).default(""),
+  role: z.enum(["student", "teacher", "admin"]),
+  yearGroup: z.number().int().min(7).max(13).nullable().default(null),
+  classId: z.string().uuid().nullable().default(null),
+  consentRecorded: z.boolean().default(false),
+});
+
+export const addMembersSchema = z.object({ studentIds: z.array(z.string().uuid()).min(1).max(100) });

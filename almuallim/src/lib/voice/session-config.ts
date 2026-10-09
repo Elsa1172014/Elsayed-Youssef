@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { evidenceInput, pageInput, searchInput } from "@/lib/tutor/tool-core";
+import { evaluateResponseInput, evidenceInput, pageInput, proposeQuestionInput, searchInput } from "@/lib/tutor/tool-core";
 
 export interface RealtimeToolDef {
   type: "function";
@@ -19,6 +19,8 @@ export function realtimeToolDefinitions(): RealtimeToolDef[] {
     { type: "function", name: "search_textbook", description: "Search the student's textbook. Call before explaining any curriculum content; returns passages with chunkId and page numbers.", parameters: schemaOf(searchInput) },
     { type: "function", name: "get_page", description: "Read the full text of one textbook page by physical page number (e.g. the confirmed page).", parameters: schemaOf(pageInput) },
     { type: "function", name: "get_lesson_outline", description: "List the lessons of the current textbook with page ranges.", parameters: schemaOf(z.object({})) },
+    { type: "function", name: "propose_question", description: "Create a practice/assessment question (with scoring rubric and hints) BEFORE asking it, so the answer can be evaluated and saved. Returns an itemId.", parameters: schemaOf(proposeQuestionInput) },
+    { type: "function", name: "evaluate_response", description: "After the student answers a question created with propose_question, score it against the rubric and record it. Never announce numeric grades.", parameters: schemaOf(evaluateResponseInput) },
     { type: "function", name: "record_evidence", description: "Record evidence about the student's answer for one skill (practice/assessment). Never tell the student a grade.", parameters: schemaOf(evidenceInput) },
   ];
 }

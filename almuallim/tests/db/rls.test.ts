@@ -118,6 +118,18 @@ describe("AI estimate vs teacher validation", () => {
     const r2 = await as(db, authed(U.t2), (q) => q("update student_responses set teacher_score=10 where id=$1", [F.resp1]));
     expect(r2.rowCount).toBe(0);
   });
+  it("the server (service role) can store the AI estimate incl. misconception; teachers cannot rewrite AI fields", async () => {
+    const rid = id();
+    await as(db, service, (q) => q(
+      "insert into student_responses (id, assessment_item_id, student_id, session_id, response_text, ai_score, ai_rubric, ai_feedback, ai_misconception, ai_scored_at) values ($1,$2,$3,$4,'إجابة',80,'[{\"criterion\":\"a\",\"points\":2,\"max\":2}]','جيد','خلط', now())",
+      [rid, F.item, U.s1, F.sess1]));
+    // as() rolls back; persist it for the follow-up check
+    await db.query("insert into student_responses (id, assessment_item_id, student_id, session_id, response_text, ai_score, ai_misconception) values ($1,$2,$3,$4,'إجابة',80,'خلط')", [rid, F.item, U.s1, F.sess1]);
+    await expect(as(db, authed(U.t1), (q) => q("update student_responses set ai_misconception='معدّل' where id=$1", [rid]))).rejects.toThrow(/immutable/);
+    await expect(as(db, authed(U.t1), (q) => q("update student_responses set ai_score=100 where id=$1", [rid]))).rejects.toThrow(/immutable/);
+    const ok = await as(db, authed(U.t1), (q) => q("update student_responses set teacher_score=70 where id=$1 returning ai_score, teacher_score", [rid]));
+    expect([Number(ok.rows[0].ai_score), Number(ok.rows[0].teacher_score)]).toEqual([80, 70]);
+  });
   it("mastery: students cannot write; teacher may only set teacher_validated", async () => {
     expect((await as(db, authed(U.s1), (q) => q("update skill_mastery set ai_estimate=1 where student_id=$1", [U.s1]))).rowCount).toBe(0);
     await expect(as(db, authed(U.s1), (q) => q("insert into skill_mastery (student_id, skill) values ($1,'writing')", [U.s1]))).rejects.toThrow(/server-written|row-level security/);

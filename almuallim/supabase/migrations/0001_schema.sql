@@ -227,6 +227,7 @@ create table public.student_responses (
   ai_score numeric(5, 2) check (ai_score between 0 and 100),
   ai_rubric jsonb,
   ai_feedback text,
+  ai_misconception text,                    -- misconception the tutor detected (shown to teachers as an AI observation)
   ai_scored_at timestamptz,
   -- Teacher-validated assessment (authoritative)
   teacher_score numeric(5, 2) check (teacher_score between 0 and 100),

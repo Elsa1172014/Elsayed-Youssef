@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { evidenceInput, pageInput, searchInput, toolGetPage, toolLessonOutline, toolRecordEvidence, toolSearchTextbook, type ToolEnv } from "./tool-core";
+import { evaluateResponseInput, evidenceInput, pageInput, proposeQuestionInput, searchInput, toolEvaluateResponse, toolGetPage, toolLessonOutline, toolProposeQuestion, toolRecordEvidence, toolSearchTextbook, type ToolEnv } from "./tool-core";
 
 /** AI SDK tool set for the text tutor. Execution is delegated to the shared cores (same code the voice path uses). */
 export function buildTutorTools(env: ToolEnv) {
@@ -19,6 +19,16 @@ export function buildTutorTools(env: ToolEnv) {
       description: "List the lessons of the current textbook with their page ranges.",
       inputSchema: z.object({}),
       execute: () => toolLessonOutline(env),
+    }),
+    propose_question: tool({
+      description: "Create a practice/assessment question (with a scoring rubric and hints) BEFORE asking it, so the student's answer can be evaluated and saved. Returns an itemId.",
+      inputSchema: proposeQuestionInput,
+      execute: (input) => toolProposeQuestion(env, input),
+    }),
+    evaluate_response: tool({
+      description: "After the student answers a question created with propose_question, score it against the rubric and record it. Does not return a grade; never announce numeric grades.",
+      inputSchema: evaluateResponseInput,
+      execute: (input) => toolEvaluateResponse(env, input),
     }),
     record_evidence: tool({
       description: "Record evidence about the student's answer for one skill (practice/assessment). Never tell the student a grade.",
