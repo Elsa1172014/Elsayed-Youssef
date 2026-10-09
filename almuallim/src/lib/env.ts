@@ -64,6 +64,16 @@ export function publicEnv(): PublicEnv {
   });
 }
 
+const cronSchema = z.object({
+  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
+  CRON_SECRET: z.string().min(16),
+  TRANSCRIPT_RETENTION_DAYS: num(90),
+});
+export function cronEnv(source: Record<string, string | undefined> = process.env) {
+  return parse(cronSchema, source);
+}
+
 let serverCache: ServerEnv | undefined;
 export function serverEnv(): ServerEnv {
   return (serverCache ??= parse(serverSchema, process.env));

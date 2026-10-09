@@ -14,9 +14,9 @@ Commands: `npm test` (unit) · `npm run test:db` (real PostgreSQL+pgvector; star
 | A5 | Students cannot write scores; AI estimate and teacher validation are stored separately; teacher stamp enforced | Auto `test:db` "AI estimate vs teacher validation" | ✅ |
 | A6 | Audit log append-only, admin-readable only | Auto `test:db` | ✅ |
 | A7 | Queue/rate-limit functions not callable by end users | Auto `test:db` | ✅ |
-| A8 | No secret reaches the client bundle | Manual: `grep -r "SERVICE_ROLE\|OPENAI_API_KEY" .next/static` returns nothing; Auto test planned in M7 | ⬜ |
-| A9 | Student can export and delete their data; deletion audited | Auto (M6) | ⬜ |
-| A10 | Rate limits and budget ceilings reject excess requests with 429 before provider calls | Auto (M6) | ⬜ |
+| A8 | No secret reaches the client bundle | `npm run build && npm run check:bundle` | ✅ (last run clean) |
+| A9 | Student can export and delete their learning data; account deletion admin-only; deletion audited only if it happened; retention purge strips old text | Auto `privacy-routes.test.ts`, `test:db` retention purge | ✅ |
+| A10 | Rate limits and budget ceilings reject excess requests with 429 before provider calls (chat, vision, realtime token, export) | Auto route tests | ✅ |
 
 ## B. Ingestion
 | ID | Requirement | Verification | Status |
@@ -57,7 +57,12 @@ Commands: `npm test` (unit) · `npm run test:db` (real PostgreSQL+pgvector; star
 ## F. Teacher dashboard & UI
 | ID | Requirement | Verification | Status |
 |---|---|---|---|
-| F1 | Dashboard shows AI estimate and teacher-validated values with distinct labels | Auto (M5) | ⬜ |
-| F2 | RTL layout, keyboard navigation, contrast, reduced motion | Manual + axe check (M7) | ⬜ |
+| F1 | AI estimate vs teacher validation distinct in DB, API and UI; evidence thresholds; interventions state their basis | Auto `analytics.test.ts`, `teacher-routes.test.ts`, `test:db` · UI pages not browser-tested with data | ✅ (logic) · 🟡 UI |
+| F2 | RTL layout, contrast, reduced motion | `npm run check:a11y -- <urls>` (axe wcag2a/aa/21aa): 0 violations on `/`, `/login`, `/privacy` and the tutor component harness in light+dark; keyboard/screen-reader pass NOT done | 🟡 |
 | F3 | `npm run build`, `typecheck` pass | Auto | ✅ (M0) |
 | F4 | Deployed to Vercel and reachable | Manual — not attempted (Vercel MCP failed to connect in this session; no credentials) | ⬜ |
+
+## G. Safeguarding
+| ID | Requirement | Verification | Status |
+|---|---|---|---|
+| G1 | Concern keywords flag a session for teachers (category only), tutor responds supportively, lesson talk about war/weapons does not flag | Auto `safety.test.ts`, `chat-route.test.ts` | ✅ (keyword net; false negatives possible) |

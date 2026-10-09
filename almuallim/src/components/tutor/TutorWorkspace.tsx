@@ -169,9 +169,20 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
   const noBooks = books.length === 0;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
-      <aside className="space-y-4" aria-label="إعدادات الدرس">
-        <section className="space-y-3 rounded-2xl border border-line bg-surface p-4">
+    <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
+      {/* Stage: the voice orb is the first and largest thing on screen. */}
+      <div className="grid gap-4 md:grid-cols-[1fr_20rem] lg:col-span-2">
+        <VoicePanel
+          state={voice.state}
+          supported={voiceSupported}
+          disabled={noBooks}
+          onStart={() => void voice.start()}
+          onStop={() => void voice.stop()}
+          onMute={voice.setMuted}
+          onInterrupt={voice.interrupt}
+        />
+
+        <section aria-label="إعدادات الدرس" className="space-y-3 rounded-2xl border border-line bg-surface p-4">
           <h2 className="font-bold">الكتاب والدرس</h2>
           {noBooks ? (
             <p className="text-sm text-muted">لا توجد كتب جاهزة بعد. اطلب من المسؤول رفع كتاب.</p>
@@ -197,6 +208,9 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
             </select>
           </label>
         </section>
+      </div>
+
+      <aside className="space-y-4" aria-label="الكاميرا والصفحة">
         <CameraPanel onCapture={handleCapture} disabled={visionBusy || noBooks} />
         <LessonCard
           recognition={recognition}
@@ -206,15 +220,6 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
           onReject={(n) => void rejectPage(n)}
           onChange={() => { setConfirmed(null); setRecognition(null); }}
           onExplain={() => void send(`اشرح لي ما في الصفحة ${confirmed?.pageNumber ?? ""} من الدرس.`)}
-        />
-        <VoicePanel
-          state={voice.state}
-          supported={voiceSupported}
-          disabled={noBooks}
-          onStart={() => void voice.start()}
-          onStop={() => void voice.stop()}
-          onMute={voice.setMuted}
-          onInterrupt={voice.interrupt}
         />
       </aside>
 

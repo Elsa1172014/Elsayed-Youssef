@@ -108,6 +108,24 @@ describe("POST /api/tutor/chat", () => {
       expect(e.payload.redacted).toBe(true);
     }
   });
+  it("flags a safeguarding concern for the teacher (category only, no text), audits it, and makes the tutor respond supportively", async () => {
+    const model = scriptedModel([textTurn(answerJson("ungrounded"))]);
+    const t = setup({ model });
+    const res = await post({ sessionId: SESSION_ID, text: "أريد أن أموت" });
+    expect(res.status).toBe(200);
+    const flag = t.events.find((e) => e.type === "safety_flag")!;
+    expect(flag.payload).toEqual({ category: "self_harm", via: "text" });
+    expect(JSON.stringify(flag.payload)).not.toContain("أموت");
+    expect(JSON.stringify((model as { doGenerateCalls: unknown[] }).doGenerateCalls[0])).toContain("شخص بالغ موثوق");
+    const aud = t.adminWrites.find((w) => w.table === "audit_logs")!;
+    expect(aud.values).toMatchObject({ action: "safety.flag", actor_id: "stud-1", metadata: { category: "self_harm" } });
+    expect(JSON.stringify(aud.values)).not.toContain("أموت");
+  });
+  it("does not flag ordinary questions", async () => {
+    const t = setup();
+    await post(valid);
+    expect(t.events.some((e) => e.type === "safety_flag")).toBe(false);
+  });
   it("502 with a friendly error (and an error event) when the provider fails", async () => {
     const failing = scriptedModel([]);
     failing.doGenerate = async () => { throw new Error("provider down"); };

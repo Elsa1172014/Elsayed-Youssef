@@ -45,3 +45,10 @@ export const createUserSchema = z.object({
 });
 
 export const addMembersSchema = z.object({ studentIds: z.array(z.string().uuid()).min(1).max(100) });
+
+export const deleteDataSchema = z.object({
+  scope: z.enum(["learning_data", "account"]),
+  studentId: z.string().uuid().optional(),
+  confirm: z.literal("حذف", { error: "اكتب كلمة «حذف» للتأكيد" }),
+});
+export const preferencesSchema = z.object({ allowTranscriptRetention: z.boolean() });

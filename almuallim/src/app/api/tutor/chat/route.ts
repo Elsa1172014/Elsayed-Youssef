@@ -10,6 +10,8 @@ import { runTutorTurn, answerToText } from "@/lib/tutor/engine";
 import { appendEvent, applyEvidence, loadHistory, loadTutorContext, sourcesOf } from "@/lib/tutor/persist";
 import { createAssessmentPersistence } from "@/lib/tutor/persist-assessment";
 import { TurnSink } from "@/lib/tutor/tool-core";
+import { audit } from "@/lib/audit";
+import { detectConcern, SUPPORT_NOTE } from "@/lib/safety/concerns";
 
 export const maxDuration = 60;
 
@@ -47,6 +49,14 @@ export async function POST(req: Request) {
   const history = await loadHistory(db, ctx.sessionId);
   await appendEvent(db, ctx.sessionId, { type: "user_text", payload: { text: body.data.text } }, retain);
 
+  // Safeguarding net: flag (category only, never the text) for the teacher and make the tutor respond supportively.
+  const concern = detectConcern(body.data.text);
+  if (concern) {
+    await appendEvent(db, ctx.sessionId, { type: "safety_flag", payload: { category: concern, via: "text" } }, true).catch(() => undefined);
+    await audit(admin, { actorId: profile.id, action: "safety.flag", targetType: "tutoring_session", targetId: ctx.sessionId, metadata: { category: concern } });
+    log.warn("safeguarding concern flagged", { category: concern });
+  }
+
   const sink = new TurnSink();
   try {
     const result = await runTutorTurn({
@@ -54,6 +64,7 @@ export async function POST(req: Request) {
       env: { ctx, db, embeddings: getEmbeddings(), sink, assessments: createAssessmentPersistence({ db, admin, ctx }) },
       history,
       userText: body.data.text,
+      extraSystem: concern ? SUPPORT_NOTE : undefined,
       abortSignal: AbortSignal.timeout(50_000),
     });
     await appendEvent(

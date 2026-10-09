@@ -360,6 +360,22 @@ returns numeric language sql stable security definer set search_path = public as
    where kind = p_kind and created_at >= p_since and (p_user is null or user_id = p_user)
 $$;
 
+-- Retention: strip free text (student speech/typing and tutor answers) from events older than N days,
+-- keeping metadata (type, timing, source references) for learning analytics. Server/cron only.
+create or replace function public.purge_old_transcripts(p_days integer)
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if p_days < 1 then raise exception 'p_days must be >= 1'; end if;
+  update public.session_events
+     set payload = (payload - 'text' - 'answer') || '{"redacted": true}'::jsonb
+   where created_at < now() - make_interval(days => p_days)
+     and type in ('user_text', 'assistant_text', 'user_speech', 'assistant_speech')
+     and (payload ? 'text' or payload ? 'answer');
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
 -- Lock server-only functions away from end users.
 revoke all on function public.enqueue_ingestion(uuid, uuid, boolean) from public, anon, authenticated;
 revoke all on function public.claim_ingestion_job(text, integer) from public, anon, authenticated;
@@ -368,6 +384,7 @@ revoke all on function public.complete_ingestion_job(uuid, text) from public, an
 revoke all on function public.fail_ingestion_job(uuid, text, text, boolean) from public, anon, authenticated;
 revoke all on function public.rate_limit_hit(text, integer, integer) from public, anon, authenticated;
 revoke all on function public.usage_sum(uuid, text, timestamptz) from public, anon, authenticated;
+revoke all on function public.purge_old_transcripts(integer) from public, anon, authenticated;
 revoke all on function public.search_content(vector, text, uuid, uuid, integer) from public, anon;
 revoke all on function public.match_pages(vector, text, uuid, integer) from public, anon;
 revoke all on function public.get_page_text(uuid, integer) from public, anon;
@@ -381,3 +398,4 @@ grant execute on function public.complete_ingestion_job(uuid, text) to service_r
 grant execute on function public.fail_ingestion_job(uuid, text, text, boolean) to service_role;
 grant execute on function public.rate_limit_hit(text, integer, integer) to service_role;
 grant execute on function public.usage_sum(uuid, text, timestamptz) to service_role;
+grant execute on function public.purge_old_transcripts(integer) to service_role;

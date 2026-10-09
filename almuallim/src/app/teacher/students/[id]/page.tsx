@@ -5,6 +5,7 @@ import { ValidateResponseForm, ValidateSkillForm } from "@/components/teacher/fo
 import { AiBadge, pctAr, SkillBars, StatusChip, TeacherBadge } from "@/components/teacher/bits";
 import { MIN_EVIDENCE, SKILL_LABEL_AR } from "@/lib/analytics/student";
 import { getAuth } from "@/lib/auth/guard";
+import { CONCERN_LABEL_AR, type ConcernCategory } from "@/lib/safety/concerns";
 import { uuidSchema } from "@/lib/schemas/admin";
 import { loadStudentDetail } from "@/lib/teacher/data";
 import { MODE_LABEL_AR, type Mode } from "@/lib/tutor/types";
@@ -26,6 +27,14 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       <Link href="/teacher" className="text-sm text-brand underline">← لوحة المعلّم</Link>
       <h1 className="mb-1 mt-2 text-3xl font-bold">{d.profile.displayName}</h1>
       <p className="mb-6 text-muted">{d.profile.yearGroup ? `الصف ${d.profile.yearGroup}` : ""}</p>
+
+      {d.safetyFlags.length > 0 && (
+        <section role="alert" aria-labelledby="safe-h" className="mb-6 rounded-2xl border-2 border-danger bg-danger/10 p-4">
+          <h2 id="safe-h" className="mb-1 text-lg font-bold text-danger">تنبيه حماية الطفل</h2>
+          <p className="text-sm">رصد النظام آليًا عبارات قد تدل على ضيق أو خطر في {d.safetyFlags.length} رسالة/رسائل. هذا الرصد بالكلمات المفتاحية وقد يخطئ أو يفوته شيء. <strong>اتبع سياسة الحماية في مدرستك وأبلغ مسؤول الحماية عند الحاجة</strong>؛ لا تُحفظ نصوص الرسائل في هذا التنبيه.</p>
+          <ul className="mt-2 list-disc ps-5 text-sm">{d.safetyFlags.map((f, i) => <li key={i}>{CONCERN_LABEL_AR[f.category as ConcernCategory] ?? f.category} — {new Date(f.createdAt).toLocaleString("ar-AE")} ({f.via === "voice" ? "صوتي" : "نصي"})</li>)}</ul>
+        </section>
+      )}
 
       <section aria-labelledby="skills-h" className="mb-8">
         <h2 id="skills-h" className="mb-1 text-xl font-bold">المهارات</h2>

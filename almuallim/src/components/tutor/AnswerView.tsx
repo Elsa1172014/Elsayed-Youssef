@@ -33,7 +33,7 @@ export function AnswerView({ answer }: { answer: VerifiedAnswer }) {
           case "question":
             return (
               <p key={i} className="rounded-xl bg-surface px-4 py-3 font-semibold ring-1 ring-line">
-                <span className="me-2 text-xs font-bold text-accent">سؤال</span>
+                <span className="me-2 text-xs font-bold text-warn">سؤال</span>
                 {s.text}
               </p>
             );

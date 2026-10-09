@@ -183,7 +183,7 @@ create table public.session_events (
   seq integer not null,
   type text not null check (type in (
     'user_text', 'user_speech', 'assistant_text', 'assistant_speech',
-    'vision_recognition', 'page_confirmed', 'page_rejected', 'tool_call', 'state', 'error')),
+    'vision_recognition', 'page_confirmed', 'page_rejected', 'tool_call', 'state', 'safety_flag', 'error')),
   payload jsonb not null default '{}'::jsonb,
   -- Source references actually retrieved and shown/used for this turn (chunk ids + pages).
   sources jsonb not null default '[]'::jsonb,

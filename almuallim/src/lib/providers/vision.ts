@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
+import { NO_STORE } from "./privacy";
 
 export const pageTranscriptionSchema = z.object({
   text: z.string().describe("The printed text that is actually visible, in reading order. Empty string if none is legible."),
@@ -43,6 +44,7 @@ export function createRecognizer(model: LanguageModel, modelName: string): PageR
         ],
         abortSignal: signal,
         maxRetries: 2,
+        providerOptions: NO_STORE,
       });
       return { result: r.output, tokens: r.usage?.totalTokens ?? 0 };
     },

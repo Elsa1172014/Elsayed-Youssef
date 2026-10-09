@@ -9,6 +9,7 @@ import { loadTeacherOverview } from "@/lib/teacher/data";
 export const dynamic = "force-dynamic";
 
 const ATTENTION = {
+  safeguarding: { label: "⚠ تنبيه حماية", cls: "bg-danger text-brand-ink" },
   "needs-support": { label: "يحتاج دعمًا", cls: "bg-danger/15 text-danger" },
   inactive: { label: "غير نشط", cls: "bg-accent/20 text-warn" },
   "no-data": { label: "لا بيانات بعد", cls: "bg-line text-muted" },

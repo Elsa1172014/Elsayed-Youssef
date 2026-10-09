@@ -59,7 +59,7 @@ export async function loadHistory(db: SupabaseClient, sessionId: string, limit =
 }
 
 export interface EventInput {
-  type: "user_text" | "assistant_text" | "user_speech" | "assistant_speech" | "vision_recognition" | "page_confirmed" | "page_rejected" | "state" | "error";
+  type: "user_text" | "assistant_text" | "user_speech" | "assistant_speech" | "vision_recognition" | "page_confirmed" | "page_rejected" | "state" | "safety_flag" | "error";
   payload: Record<string, unknown>;
   sources?: unknown[];
 }

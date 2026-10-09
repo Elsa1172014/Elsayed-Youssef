@@ -100,10 +100,10 @@ export function analyzeStudent(mastery: MasteryInput[], responses: ResponseInput
 }
 
 // ───────────── class level ─────────────
-export interface StudentSummaryInput { id: string; displayName: string; yearGroup: number | null; mastery: MasteryInput[]; responses: ResponseInput[]; sessions: number; lastActive: string | null }
+export interface StudentSummaryInput { id: string; displayName: string; yearGroup: number | null; mastery: MasteryInput[]; responses: ResponseInput[]; sessions: number; lastActive: string | null; safetyFlags?: number }
 export interface StudentOverview {
   id: string; displayName: string; yearGroup: number | null; sessions: number; lastActive: string | null; evidence: number;
-  gaps: Skill[]; strengths: Skill[]; attention: "needs-support" | "inactive" | "no-data" | "ok";
+  gaps: Skill[]; strengths: Skill[]; safetyFlags: number; attention: "safeguarding" | "needs-support" | "inactive" | "no-data" | "ok";
 }
 export const INACTIVE_DAYS = 14;
 
@@ -113,9 +113,10 @@ export function summarizeClass(students: StudentSummaryInput[], now = Date.now()
       const a = analyzeStudent(s.mastery, s.responses);
       const evidence = a.skills.reduce((n, k) => n + k.evidence, 0);
       const inactive = s.lastActive ? now - new Date(s.lastActive).getTime() > INACTIVE_DAYS * 86400_000 : true;
-      const attention: StudentOverview["attention"] = a.gaps.length ? "needs-support" : evidence === 0 ? "no-data" : inactive ? "inactive" : "ok";
-      return { id: s.id, displayName: s.displayName, yearGroup: s.yearGroup, sessions: s.sessions, lastActive: s.lastActive, evidence, gaps: a.gaps, strengths: a.strengths, attention };
+      const flags = s.safetyFlags ?? 0;
+      const attention: StudentOverview["attention"] = flags > 0 ? "safeguarding" : a.gaps.length ? "needs-support" : evidence === 0 ? "no-data" : inactive ? "inactive" : "ok";
+      return { id: s.id, displayName: s.displayName, yearGroup: s.yearGroup, sessions: s.sessions, lastActive: s.lastActive, evidence, gaps: a.gaps, strengths: a.strengths, safetyFlags: flags, attention };
     })
     .sort((x, y) => RANK[x.attention] - RANK[y.attention] || x.displayName.localeCompare(y.displayName, "ar"));
 }
-const RANK = { "needs-support": 0, inactive: 1, "no-data": 2, ok: 3 } as const;
+const RANK = { safeguarding: -1, "needs-support": 0, inactive: 1, "no-data": 2, ok: 3 } as const;

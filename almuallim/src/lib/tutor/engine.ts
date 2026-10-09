@@ -3,6 +3,7 @@ import { verifyAnswer, tutorAnswerSchema, type TutorAnswer, type VerifiedAnswer 
 import { buildSystemPrompt } from "./prompt";
 import type { ToolEnv } from "./tool-core";
 import { buildTutorTools } from "./tools";
+import { NO_STORE } from "@/lib/providers/privacy";
 import type { Mode } from "./types";
 
 const GUARDED_MODES: Mode[] = ["practice", "assessment", "socratic"];
@@ -48,10 +49,12 @@ export async function runTutorTurn(p: {
   env: ToolEnv;
   history: ModelMessage[];
   userText: string;
+  /** Extra system text for this turn only (e.g. safeguarding note). */
+  extraSystem?: string;
   abortSignal?: AbortSignal;
 }): Promise<TurnResult> {
   const { env } = p;
-  const system = buildSystemPrompt(env.ctx);
+  const system = buildSystemPrompt(env.ctx) + (p.extraSystem ? `\n\n${p.extraSystem}` : "");
   const messages: ModelMessage[] = [...p.history, { role: "user", content: p.userText }];
   const tools = buildTutorTools(env);
   let tokens = 0;
@@ -66,6 +69,7 @@ export async function runTutorTurn(p: {
       stopWhen: isStepCount(6), // tool call(s) + final structured-output step
       abortSignal: p.abortSignal,
       maxRetries: 2,
+      providerOptions: NO_STORE,
     });
     tokens += r.totalUsage?.totalTokens ?? 0;
     return r.output;

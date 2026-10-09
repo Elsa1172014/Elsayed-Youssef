@@ -4,6 +4,8 @@ import { realtimeEventsSchema } from "@/lib/schemas/tutor";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { appendEvent, loadTutorContext } from "@/lib/tutor/persist";
 import { settleOpenVoice } from "@/lib/voice/usage";
+import { audit } from "@/lib/audit";
+import { detectConcern } from "@/lib/safety/concerns";
 
 /** Persist voice transcripts and connection-state events reported by the client (RLS + retention preference apply). */
 export async function POST(req: Request) {
@@ -18,6 +20,13 @@ export async function POST(req: Request) {
   if (!loaded) return apiError("not_found", "الجلسة غير موجودة");
 
   for (const e of events) {
+    if (e.type === "user_speech") {
+      const concern = detectConcern(e.text);
+      if (concern) {
+        await appendEvent(db, sessionId, { type: "safety_flag", payload: { category: concern, via: "voice" } }, true).catch(() => undefined);
+        await audit(createSupabaseAdmin(), { actorId: profile.id, action: "safety.flag", targetType: "tutoring_session", targetId: sessionId, metadata: { category: concern } });
+      }
+    }
     if (e.type === "user_speech") await appendEvent(db, sessionId, { type: "user_speech", payload: { text: e.text } }, profile.allow_transcript_retention);
     else if (e.type === "assistant_speech") await appendEvent(db, sessionId, { type: "assistant_speech", payload: { text: e.text, interrupted: e.interrupted } }, profile.allow_transcript_retention);
     else if (e.type === "error") await appendEvent(db, sessionId, { type: "error", payload: { where: "voice", code: e.code } }, true);

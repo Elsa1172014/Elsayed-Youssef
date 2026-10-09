@@ -21,8 +21,9 @@ export function VoicePanel({ state, supported, onStart, onStop, onMute, onInterr
   const btn = "rounded-xl px-4 py-2 text-sm font-semibold ring-1 ring-line disabled:opacity-50";
 
   return (
-    <section aria-label="المحادثة الصوتية" className="space-y-3 rounded-2xl border border-line bg-surface p-4">
-      <VoiceOrb mode={mode} />
+    <section aria-label="المحادثة الصوتية" className="items-center gap-8 space-y-3 rounded-2xl border border-line bg-surface p-5 md:flex md:space-y-0">
+      <div className="shrink-0"><VoiceOrb mode={mode} /></div>
+      <div className="min-w-0 flex-1 space-y-3">
       <p role="status" aria-live="polite" className="text-center text-sm font-semibold">
         {state.phase === "reconnecting" ? `انقطع الاتصال — جارٍ إعادة المحاولة (${state.reconnectAttempt})…` : orbLabel(mode)}
       </p>
@@ -35,7 +36,7 @@ export function VoicePanel({ state, supported, onStart, onStop, onMute, onInterr
         <p role="note" className="rounded-lg bg-accent/10 px-3 py-2 text-sm text-warn">{VOICE_ERROR_MESSAGE_AR.unsupported}</p>
       )}
 
-      <div className="flex flex-wrap justify-center gap-2">
+      <div className="flex flex-wrap justify-center gap-2 md:justify-start">
         {!live && !busy && (
           <button type="button" onClick={onStart} disabled={!supported || disabled} className={`${btn} bg-brand text-brand-ink`}>
             {state.phase === "error" || state.phase === "ended" ? "إعادة بدء المحادثة الصوتية" : "ابدأ المحادثة الصوتية"}
@@ -54,9 +55,10 @@ export function VoicePanel({ state, supported, onStart, onStop, onMute, onInterr
           </>
         )}
       </div>
-      <p className="text-center text-xs text-muted">
+      <p className="text-center text-xs text-muted md:text-start">
         يمكنك مقاطعة المعلّم بالكلام في أي لحظة. في الفصل المزدحم استخدم سماعة رأس بميكروفون. على الجوال يتوقف الصوت عند قفل الشاشة. الكتابة متاحة دائمًا.
       </p>
+      </div>
     </section>
   );
 }

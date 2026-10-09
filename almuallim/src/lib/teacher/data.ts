@@ -23,11 +23,13 @@ export async function loadTeacherOverview(db: SupabaseClient): Promise<ClassOver
   const studentIds = [...new Set((members ?? []).map((m) => m.student_id as string))];
   if (!studentIds.length) return classes.map((c) => ({ id: c.id, name: c.name, yearGroup: c.year_group, students: [] }));
 
-  const [{ data: profiles }, { data: mastery }, { data: responses }, { data: sessions }] = await Promise.all([
+  const since = new Date(Date.now() - 30 * 86400_000).toISOString();
+  const [{ data: profiles }, { data: mastery }, { data: responses }, { data: sessions }, { data: flags }] = await Promise.all([
     db.from("profiles").select("id, display_name, year_group").in("id", studentIds),
     db.from("skill_mastery").select("student_id, skill, lesson_id, ai_estimate, teacher_validated, evidence_count").in("student_id", studentIds),
     db.from("student_responses").select("id, student_id, ai_score, teacher_score, hints_used, ai_misconception, created_at, assessment_items(skill)").in("student_id", studentIds).order("created_at", { ascending: false }).limit(2000),
     db.from("tutoring_sessions").select("student_id, started_at").in("student_id", studentIds).order("started_at", { ascending: false }).limit(5000),
+    db.from("session_events").select("student_id").eq("type", "safety_flag").gte("created_at", since).in("student_id", studentIds).limit(2000),
   ]);
 
   return classes.map((c) => {
@@ -39,6 +41,7 @@ export async function loadTeacherOverview(db: SupabaseClient): Promise<ClassOver
         mastery: ((mastery ?? []) as MasteryRow[]).filter((x) => x.student_id === p.id).map(toMastery),
         responses: ((responses ?? []) as RespRow[]).filter((x) => x.student_id === p.id).map(toResponse),
         sessions: ss.length, lastActive: (ss[0]?.started_at as string | undefined) ?? null,
+        safetyFlags: (flags ?? []).filter((f) => f.student_id === p.id).length,
       };
     });
     return { id: c.id, name: c.name, yearGroup: c.year_group, students: summarizeClass(students) };
@@ -56,18 +59,20 @@ export interface StudentDetail {
   responses: ResponseDetail[];
   sessions: { id: string; mode: string; startedAt: string; endedAt: string | null; channel: string; currentPage: number | null }[];
   sourcePages: { lesson: string | null; pages: string; count: number }[];
+  safetyFlags: { category: string; createdAt: string; via: string }[];
 }
 
 export async function loadStudentDetail(db: SupabaseClient, studentId: string): Promise<StudentDetail | null> {
   const { data: profile } = await db.from("profiles").select("id, display_name, year_group").eq("id", studentId).single();
   if (!profile) return null; // not visible under RLS (not this teacher's student) or does not exist
-  const [{ data: mastery }, { data: resp }, { data: sessions }, { data: events }] = await Promise.all([
+  const [{ data: mastery }, { data: resp }, { data: sessions }, { data: events }, { data: flagRows }] = await Promise.all([
     db.from("skill_mastery").select("student_id, skill, lesson_id, ai_estimate, teacher_validated, evidence_count").eq("student_id", studentId),
     db.from("student_responses")
       .select("id, student_id, ai_score, teacher_score, hints_used, ai_misconception, created_at, response_text, ai_feedback, teacher_feedback, teacher_validated_at, assessment_items(skill, prompt)")
       .eq("student_id", studentId).order("created_at", { ascending: false }).limit(60),
     db.from("tutoring_sessions").select("id, mode, started_at, ended_at, channel, current_page").eq("student_id", studentId).order("started_at", { ascending: false }).limit(20),
     db.from("session_events").select("sources").eq("student_id", studentId).in("type", ["assistant_text"]).order("created_at", { ascending: false }).limit(60),
+    db.from("session_events").select("payload, created_at").eq("student_id", studentId).eq("type", "safety_flag").order("created_at", { ascending: false }).limit(20),
   ]);
   interface Full extends Omit<RespRow, "assessment_items"> { response_text: string; ai_feedback: string | null; teacher_feedback: string | null; teacher_validated_at: string | null; assessment_items: { skill: Skill; prompt: string } | { skill: Skill; prompt: string }[] | null }
   const rows = (resp ?? []) as unknown as Full[];
@@ -94,5 +99,6 @@ export async function loadStudentDetail(db: SupabaseClient, studentId: string): 
     }),
     sessions: (sessions ?? []).map((s) => ({ id: s.id, mode: s.mode, startedAt: s.started_at, endedAt: s.ended_at, channel: s.channel, currentPage: s.current_page })),
     sourcePages: [...refs.values()].sort((a, b) => b.count - a.count).slice(0, 10),
+    safetyFlags: (flagRows ?? []).map((f) => ({ category: String((f.payload as { category?: string } | null)?.category ?? "danger"), via: String((f.payload as { via?: string } | null)?.via ?? "text"), createdAt: f.created_at as string })),
   };
 }

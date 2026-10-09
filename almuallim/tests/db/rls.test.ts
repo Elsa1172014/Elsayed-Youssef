@@ -202,3 +202,29 @@ describe("server-only functions", () => {
     expect(res.every(Boolean)).toBe(true);
   });
 });
+
+describe("retention purge", () => {
+  it("strips free text from old conversation events, keeps metadata and recent text, and is server-only", async () => {
+    const sess = id();
+    await db.query("insert into tutoring_sessions (id, student_id) values ($1,$2)", [sess, U.s1]);
+    const ins = (seq: number, type: string, payload: object, ageDays: number) =>
+      db.query("insert into session_events (session_id, student_id, seq, type, payload, sources, created_at) values ($1,$2,$3,$4,$5::jsonb,'[{\"pageStart\":2}]', now() - make_interval(days => $6))", [sess, U.s1, seq, type, JSON.stringify(payload), ageDays]);
+    await ins(1, "user_text", { text: "سؤال قديم" }, 100);
+    await ins(2, "assistant_text", { text: "جواب قديم", answer: { segments: [] }, grounding: "grounded" }, 100);
+    await ins(3, "user_text", { text: "سؤال حديث" }, 1);
+    await ins(4, "page_confirmed", { pageNumber: 4 }, 100);
+    await ins(5, "safety_flag", { category: "bullying", via: "text" }, 100);
+    const n = (await as(db, service, (q) => q("select purge_old_transcripts(90) as n"))).rows[0].n;
+    await db.query("select purge_old_transcripts(90)"); // run for real (the as() above rolled back)
+    const rows = (await db.query("select seq, payload, sources from session_events where session_id=$1 order by seq", [sess])).rows;
+    expect(n).toBe(2);
+    expect(rows[0].payload).toEqual({ redacted: true });
+    expect(rows[1].payload).toEqual({ grounding: "grounded", redacted: true });
+    expect(rows[1].sources).toEqual([{ pageStart: 2 }]); // citations metadata survives
+    expect(rows[2].payload).toEqual({ text: "سؤال حديث" });
+    expect(rows[3].payload).toEqual({ pageNumber: 4 });
+    expect(rows[4].payload).toEqual({ category: "bullying", via: "text" });
+    await expect(as(db, authed(U.admin), (q) => q("select purge_old_transcripts(1)"))).rejects.toThrow(/permission denied/);
+    await expect(as(db, service, (q) => q("select purge_old_transcripts(0)"))).rejects.toThrow(/p_days/);
+  });
+});

@@ -11,7 +11,10 @@
     "test": "vitest run",
     "test:db": "vitest run --config vitest.db.config.ts",
     "worker": "tsx worker/index.ts",
-    "worker:once": "tsx worker/index.ts --once"
+    "worker:once": "tsx worker/index.ts --once",
+    "check:bundle": "bash scripts/check-bundle-secrets.sh",
+    "check:a11y": "node scripts/a11y-check.mjs",
+    "db:test-cluster": "bash scripts/test-db-cluster.sh start"
   },
   "engines": {
     "node": ">=20.9"
@@ -23,6 +26,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "axe-core": "^4.14.0",
     "jsdom": "^29.1.1",
     "pg": "^8.23.1",
     "playwright-core": "^1.64.0",
