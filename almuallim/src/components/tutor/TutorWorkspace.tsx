@@ -3,7 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { VerifiedAnswer } from "@/lib/tutor/answer";
 import type { BookOption, ChatMessage, SessionState } from "@/lib/tutor/client-types";
 import { type Level, type Mode } from "@/lib/tutor/types";
+import type { ConfirmedPage, RecognitionResult } from "@/lib/vision/client-types";
 import { AnswerView } from "./AnswerView";
+import { CameraPanel } from "./CameraPanel";
+import { LessonCard } from "./LessonCard";
 import { ModeTabs } from "./ModeTabs";
 
 const LEVEL_AR: Record<Level, string> = { support: "دعم", core: "أساسي", challenge: "تحدٍّ" };
@@ -20,6 +23,9 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recognition, setRecognition] = useState<RecognitionResult | null>(null);
+  const [confirmed, setConfirmed] = useState<ConfirmedPage | null>(null);
+  const [visionBusy, setVisionBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   const book = books.find((b) => b.versionId === versionId) ?? null;
@@ -65,6 +71,66 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
     }
   }
 
+  const addSystem = (text: string) => setMessages((m) => [...m, { id: nid(), role: "system", text }]);
+
+  const handleCapture = useCallback(
+    async (jpeg: Blob) => {
+      if (!versionId) return setError("اختر الكتاب أولًا ثم التقط الصفحة.");
+      setVisionBusy(true);
+      setError(null);
+      try {
+        const s = await ensureSession();
+        const fd = new FormData();
+        fd.set("sessionId", s.id);
+        fd.set("image", jpeg, "page.jpg");
+        const r = await fetch("/api/vision/recognize", { method: "POST", body: fd });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.error?.message ?? "تعذّر تحليل الصورة");
+        setRecognition(j as RecognitionResult);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "تعذّر تحليل الصورة. تحقق من الشبكة.");
+      } finally {
+        setVisionBusy(false);
+      }
+    },
+    [versionId, ensureSession],
+  );
+
+  async function confirmPage(pageNumber: number, source: "camera" | "manual") {
+    setVisionBusy(true);
+    setError(null);
+    try {
+      const s = await ensureSession();
+      const r = await fetch("/api/vision/confirm", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: s.id, pageNumber, source }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error?.message ?? "تعذّر تأكيد الصفحة");
+      const ctx = j.context as ConfirmedPage;
+      setConfirmed(ctx);
+      setRecognition(null);
+      if (ctx.lessonId && book?.lessons.some((l) => l.id === ctx.lessonId)) {
+        setLessonId(ctx.lessonId);
+        setSession({ ...s, lessonId: ctx.lessonId });
+      }
+      addSystem(`تم تأكيد الصفحة ${pageNumber}${ctx.lessonTitle ? ` — ${ctx.lessonTitle}` : ""}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذّر تأكيد الصفحة");
+    } finally {
+      setVisionBusy(false);
+    }
+  }
+
+  async function rejectPage(pageNumber: number) {
+    setRecognition(null);
+    if (!session) return;
+    await fetch("/api/vision/confirm", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: session.id, pageNumber, source: "camera", accepted: false }),
+    }).catch(() => undefined);
+  }
+
   const select = "rounded-lg border border-line bg-surface px-3 py-2 text-sm";
   const noBooks = books.length === 0;
 
@@ -97,7 +163,17 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
             </select>
           </label>
         </section>
-        {/* Camera + recognized-lesson card mount here (M3). Voice orb mounts in the conversation header (M4). */}
+        <CameraPanel onCapture={handleCapture} disabled={visionBusy || noBooks} />
+        <LessonCard
+          recognition={recognition}
+          confirmed={confirmed}
+          busy={visionBusy}
+          onConfirm={(n, src) => void confirmPage(n, src)}
+          onReject={(n) => void rejectPage(n)}
+          onChange={() => { setConfirmed(null); setRecognition(null); }}
+          onExplain={() => void send(`اشرح لي ما في الصفحة ${confirmed?.pageNumber ?? ""} من الدرس.`)}
+        />
+        {/* Voice orb mounts in the conversation header (M4). */}
       </aside>
 
       <section className="flex min-h-[32rem] flex-col rounded-2xl border border-line bg-surface" aria-label="المحادثة">

@@ -41,9 +41,9 @@ Commands: `npm test` (unit) · `npm run test:db` (real PostgreSQL+pgvector; star
 ## D. Camera / page matching
 | ID | Requirement | Verification | Status |
 |---|---|---|---|
-| D1 | Permission states: prompt/granted/denied/no-device/insecure | Auto (M3, mocked mediaDevices) | ⬜ |
-| D2 | Stability detector fires only on steady, sharp frames | Auto (M3, synthetic images) | ⬜ |
-| D3 | `decideMatch` → confident / ambiguous / none with margin & page-number logic | Auto (M3) | ⬜ |
+| D1 | Permission states: denied/no-device/in-use/insecure/unsupported with actionable Arabic messages; rear camera requested; constraint fallback | Auto `camera-vision.test.ts`, `camera-ui.test.tsx` | ✅ |
+| D2 | Stability detector fires only on steady, sharp, lit frames; re-arms only after movement | Auto `camera-vision.test.ts` (synthetic frames; thresholds uncalibrated) | ✅ (logic) |
+| D3 | `decideMatch` → confident / ambiguous / none with margin & printed-page-number logic; end-to-end against real `match_pages` on the ingested PDF; image never stored; confirmation always required | Auto `page-match.test.ts`, `vision-routes.test.ts`, `test:db` | ✅ |
 | D4 | Live camera on a physical page matches correct page | Manual 🟡 (device + OpenAI key + ingested book) | ⬜ |
 
 ## E. Voice

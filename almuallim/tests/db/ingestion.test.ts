@@ -7,8 +7,12 @@ import { processJob } from "@/lib/ingestion/process-job";
 import { createQueueClient } from "@/lib/ingestion/queue";
 import type { IngestionPorts } from "@/lib/ingestion/pipeline";
 import { FakeEmbeddings, FixturePdfSource, fixtureSha, makeFakeEmbedding } from "../helpers/fakes";
-import { as, connect, service } from "./helpers";
+import { as, connect, pgRpc, service } from "./helpers";
 import { toVectorLiteral } from "@/lib/providers/embeddings";
+import { lexicalQueryText } from "@/lib/retrieval/lexical";
+import { searchTextbook } from "@/lib/retrieval/search";
+import { decideMatch } from "@/lib/vision/page-match";
+import { findPageCandidates } from "@/lib/vision/recognize";
 
 let db: Client;
 let admin: string;
@@ -156,7 +160,6 @@ describe("ingestion pipeline on real PostgreSQL + the real PDF fixture", () => {
 
 describe("retrieval over ingested content (real PostgreSQL)", () => {
   it("lexical query expansion finds 'الفاعل' from a bare 'فاعل' even when the vector says nothing", async () => {
-    const { lexicalQueryText } = await import("@/lib/retrieval/lexical");
     const { v, path } = await newVersion("sample-textbook.pdf");
     await enqueueAndRun(v, mkPorts({ [path]: "sample-textbook.pdf" }));
     const unrelated = toVectorLiteral(makeFakeEmbedding("zzz qqq www"));
@@ -178,5 +181,64 @@ describe("retrieval over ingested content (real PostgreSQL)", () => {
     expect(after.rows[0].text).toContain("الفاعل اسم مرفوع");
     expect(after.rows[0].lesson_title).toContain("الفاعل");
     await expect(as(db, { sub: null, role: "anon" }, (q) => q("select * from get_page_text($1, 2)", [v]))).rejects.toThrow(/permission denied/);
+  });
+});
+
+describe("camera page matching over ingested pages (real PostgreSQL, real match_pages + decideMatch)", () => {
+  async function ingested() {
+    const { v, path } = await newVersion("sample-textbook.pdf");
+    await enqueueAndRun(v, mkPorts({ [path]: "sample-textbook.pdf" }));
+    return v;
+  }
+  const match = async (v: string, ocrText: string, printed: string | null = null) => {
+    const { candidates } = await findPageCandidates({ db: pgRpc(db), embeddings: new FakeEmbeddings() }, { versionId: v, text: ocrText });
+    return decideMatch(candidates, { printedPageNumber: printed, textChars: ocrText.length, legibility: "good" });
+  };
+
+  it("matches noisy OCR of page 4 (no diacritics, a dropped line) to page 4", async () => {
+    const v = await ingested();
+    const r = await match(v, "المفعول به اسم منصوب يقع عليه فعل الفاعل نقول فتح الطالب الباب فكلمة الباب مفعول به");
+    expect(r.candidates[0]!.pageNumber).toBe(4);
+    expect(r.candidates[0]!.lessonTitle).toContain("المفعول به");
+    expect(r.decision).not.toBe("none");
+  });
+
+  it("matches page 2 and uses the printed number when the two exercise pages look alike", async () => {
+    const v = await ingested();
+    const r2 = await match(v, "الفاعل اسم مرفوع يدل على من قام بالفعل أو اتصف به ويأتي بعد الفعل مباشرة");
+    expect(r2.candidates[0]!.pageNumber).toBe(2);
+    // pages 3 and 5 are both "تدريب" pages: the visible page number must be able to settle it
+    const ex = "تدريب استخرج الفاعل أعرب ما تحته خط فاعل مفعول به";
+    const r5 = await match(v, ex, "5");
+    expect(r5.candidates[0]!.pageNumber).toBe(5);
+    expect(r5.candidates[0]!.printedNumberMatch).toBe(true);
+  });
+
+  it("does not claim a match for text that is not in the book", async () => {
+    const v = await ingested();
+    const r = await match(v, "في علم الفلك تدور الكواكب حول الشمس في مدارات بيضاوية وتختلف سرعتها بحسب بعدها عنها");
+    expect(r.decision).toBe("none");
+  });
+
+  it("returns candidates only from the requested (ready) version", async () => {
+    const v = await ingested();
+    const other = await newVersion("sample-textbook.pdf", "e".repeat(64)); // never ingested → not ready
+    const { candidates } = await findPageCandidates({ db: pgRpc(db), embeddings: new FakeEmbeddings() }, { versionId: other.v, text: "الفاعل اسم مرفوع" });
+    expect(candidates).toEqual([]);
+    expect((await findPageCandidates({ db: pgRpc(db), embeddings: new FakeEmbeddings() }, { versionId: v, text: "الفاعل اسم مرفوع" })).candidates.length).toBeGreaterThan(0);
+  });
+});
+
+describe("searchTextbook end-to-end against the real database function", () => {
+  it("returns cited passages and a grounding level through the TypeScript client", async () => {
+    const { v, path } = await newVersion("sample-textbook.pdf");
+    await enqueueAndRun(v, mkPorts({ [path]: "sample-textbook.pdf" }));
+    const deps = { db: pgRpc(db), embeddings: new FakeEmbeddings() };
+    const hit = await searchTextbook(deps, { versionId: v, query: "ما هو الفاعل؟" });
+    expect(hit.passages[0]!.content).toContain("الفاعل اسم مرفوع");
+    expect(hit.passages[0]!.pageStart).toBeGreaterThanOrEqual(2);
+    expect(hit.grounding.level).not.toBe("none");
+    const miss = await searchTextbook(deps, { versionId: v, query: "كيف تدور الكواكب حول الشمس" });
+    expect(miss.grounding.level).not.toBe("strong");
   });
 });

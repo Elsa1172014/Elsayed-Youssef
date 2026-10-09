@@ -52,3 +52,19 @@ export function vec(i: number, dims = 1536): string {
   a[i] = 1;
   return `[${a.join(",")}]`;
 }
+
+/** Adapts a pg Client to the `rpc(name, args)` shape used by app code, using named-argument call syntax. */
+export function pgRpc(db: Client, actor: Actor = service) {
+  return {
+    async rpc(name: string, args: Record<string, unknown>) {
+      const keys = Object.keys(args);
+      const sql = `select * from ${name}(${keys.map((k, i) => `${k} => $${i + 1}`).join(", ")})`;
+      try {
+        const r = await as(db, actor, (q) => q(sql, keys.map((k) => args[k])));
+        return { data: r.rows, error: null };
+      } catch (e) {
+        return { data: null, error: { message: (e as Error).message } };
+      }
+    },
+  };
+}

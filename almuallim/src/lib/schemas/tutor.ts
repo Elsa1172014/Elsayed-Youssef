@@ -21,3 +21,10 @@ export const patchSessionSchema = z.object({
   level: levelSchema.optional(),
   status: z.literal("ended").optional(),
 });
+
+export const confirmPageSchema = z.object({
+  sessionId: z.string().uuid(),
+  pageNumber: z.number().int().min(1).max(2000),
+  source: z.enum(["camera", "manual"]),
+  accepted: z.boolean().default(true),
+});
