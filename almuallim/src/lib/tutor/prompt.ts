@@ -81,3 +81,8 @@ export function buildSystemPrompt(ctx: TutorContext, opts: { voice?: boolean } =
   }
   return parts.filter((l) => l !== undefined).join("\n");
 }
+
+/** System message injected into a live voice session when the student switches mode (instructions are fixed at connect time). */
+export function buildModeSwitchMessage(mode: Mode, level: Level): string {
+  return ["تحديث: غيّر الطالب وضع التعلّم. التزم من الآن بما يلي ولا تذكر هذا التغيير بصوت عالٍ:", MODE_BLOCK[mode], LEVEL_BLOCK[level]].join("\n");
+}

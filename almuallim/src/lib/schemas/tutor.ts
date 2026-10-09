@@ -28,3 +28,27 @@ export const confirmPageSchema = z.object({
   source: z.enum(["camera", "manual"]),
   accepted: z.boolean().default(true),
 });
+
+export const realtimeTokenSchema = z.object({ sessionId: z.string().uuid() });
+
+export const realtimeToolSchema = z.object({
+  sessionId: z.string().uuid(),
+  name: z.enum(["search_textbook", "get_page", "get_lesson_outline", "record_evidence"]),
+  arguments: z.union([z.string().max(4000), z.record(z.string(), z.unknown())]).default("{}"),
+  callId: z.string().max(100),
+});
+
+export const realtimeEventsSchema = z.object({
+  sessionId: z.string().uuid(),
+  events: z
+    .array(
+      z.discriminatedUnion("type", [
+        z.object({ type: z.literal("user_speech"), text: z.string().max(4000) }),
+        z.object({ type: z.literal("assistant_speech"), text: z.string().max(8000), interrupted: z.boolean().default(false) }),
+        z.object({ type: z.literal("state"), voice: z.enum(["started", "ended", "reconnecting", "reconnected", "muted", "unmuted"]) }),
+        z.object({ type: z.literal("error"), code: z.string().max(60) }),
+      ]),
+    )
+    .min(1)
+    .max(20),
+});

@@ -74,3 +74,12 @@ describe("createRecognizer (vision adapter)", () => {
     expect(call).toContain("image/jpeg");
   });
 });
+
+import { buildModeSwitchMessage } from "@/lib/tutor/prompt";
+describe("buildModeSwitchMessage", () => {
+  it("carries the new mode and level rules", () => {
+    const m = buildModeSwitchMessage("assessment", "challenge");
+    expect(m).toContain("وضع «التقييم»");
+    expect(m).toContain("تحدٍّ");
+  });
+});

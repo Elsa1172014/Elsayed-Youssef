@@ -46,3 +46,38 @@ html { background: var(--bg); }
 body { color: var(--ink); font-family: var(--font-sans); line-height: 1.8; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ───────── Voice orb ───────── */
+.orb { position: relative; width: 11rem; height: 11rem; margin-inline: auto; display: grid; place-items: center; }
+.orb-core {
+  position: relative; z-index: 2; width: 6.5rem; height: 6.5rem; border-radius: 9999px; display: grid; place-items: center;
+  background: radial-gradient(circle at 30% 28%, color-mix(in srgb, var(--brand) 55%, white), var(--brand) 62%, color-mix(in srgb, var(--brand) 70%, black));
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--brand) 40%, transparent), inset 0 -6px 14px rgb(0 0 0 / 0.18);
+  transition: transform .25s ease, filter .25s ease, background .25s ease;
+}
+.orb-ring { position: absolute; inset: 1.2rem; border-radius: 9999px; border: 2px solid var(--brand); opacity: 0; }
+.orb-bars { display: flex; align-items: center; gap: 4px; height: 2.2rem; opacity: 0; transition: opacity .2s; }
+.orb-bars i { width: 5px; height: 30%; border-radius: 9999px; background: var(--brand-ink); display: block; }
+
+.orb-idle .orb-core { filter: saturate(.6) brightness(.95); animation: orb-breathe 4.5s ease-in-out infinite; }
+.orb-connecting .orb-core { animation: orb-breathe 1.4s ease-in-out infinite; }
+.orb-connecting .orb-ring-1 { opacity: .6; border-style: dashed; animation: orb-spin 2.4s linear infinite; }
+.orb-listening .orb-core { animation: orb-breathe 3s ease-in-out infinite; }
+.orb-listening .orb-ring-1 { opacity: .35; animation: orb-ripple 3s ease-out infinite; }
+.orb-user-speaking .orb-core { transform: scale(1.06); background: radial-gradient(circle at 30% 28%, color-mix(in srgb, var(--accent) 60%, white), var(--accent) 60%, color-mix(in srgb, var(--accent) 70%, black)); }
+.orb-user-speaking .orb-ring-1 { animation: orb-ripple 1.2s ease-out infinite; border-color: var(--accent); }
+.orb-user-speaking .orb-ring-2 { animation: orb-ripple 1.2s ease-out .6s infinite; border-color: var(--accent); }
+.orb-thinking .orb-ring-1 { opacity: .7; border-style: dotted; animation: orb-spin 1.6s linear infinite; }
+.orb-thinking .orb-core { animation: orb-breathe 1.2s ease-in-out infinite; }
+.orb-speaking .orb-bars { opacity: 1; }
+.orb-speaking .orb-bars i { animation: orb-bar .9s ease-in-out infinite; }
+.orb-speaking .orb-bars i:nth-child(2) { animation-delay: .12s; } .orb-speaking .orb-bars i:nth-child(3) { animation-delay: .24s; }
+.orb-speaking .orb-bars i:nth-child(4) { animation-delay: .36s; } .orb-speaking .orb-bars i:nth-child(5) { animation-delay: .48s; }
+.orb-speaking .orb-ring-1 { animation: orb-ripple 1.8s ease-out infinite; }
+.orb-muted .orb-core { filter: grayscale(1) brightness(.8); }
+.orb-error .orb-core { background: radial-gradient(circle at 30% 28%, color-mix(in srgb, var(--danger) 55%, white), var(--danger)); box-shadow: 0 8px 30px color-mix(in srgb, var(--danger) 40%, transparent); }
+
+@keyframes orb-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+@keyframes orb-ripple { 0% { transform: scale(.9); opacity: .55; } 100% { transform: scale(1.45); opacity: 0; } }
+@keyframes orb-spin { to { transform: rotate(360deg); } }
+@keyframes orb-bar { 0%, 100% { height: 25%; } 50% { height: 100%; } }

@@ -100,3 +100,36 @@ export async function applyEvidence(admin: SupabaseClient, studentId: string, le
     }
   }
 }
+
+export interface LoadedPage {
+  pageNumber: number;
+  printedLabel: string | null;
+  text: string;
+  lessonId: string | null;
+  lessonTitle: string | null;
+  bookTitle: string;
+  objectives: string[]; // teacher-verified only
+}
+
+/** Validated page context straight from the database (never from the camera/OCR). RLS applies. */
+export async function loadPageContext(db: SupabaseClient, versionId: string, pageNumber: number): Promise<LoadedPage | null> {
+  const { data: rows, error } = await db.rpc("get_page_text", { p_book_version_id: versionId, p_page_number: pageNumber });
+  if (error) throw new Error(`get_page_text failed: ${error.message}`);
+  const page = (rows as { page_number: number; printed_label: string | null; text: string; lesson_id: string | null; lesson_title: string | null }[] | null)?.[0];
+  if (!page) return null;
+  const [{ data: bv }, { data: lesson }] = await Promise.all([
+    db.from("book_versions").select("books(title)").eq("id", versionId).single(),
+    page.lesson_id ? db.from("lessons").select("learning_objectives, verified_at").eq("id", page.lesson_id).single() : Promise.resolve({ data: null }),
+  ]);
+  const books = (bv as { books: { title: string } | { title: string }[] | null } | null)?.books;
+  const l = lesson as { learning_objectives: string[]; verified_at: string | null } | null;
+  return {
+    pageNumber: page.page_number,
+    printedLabel: page.printed_label,
+    text: page.text,
+    lessonId: page.lesson_id,
+    lessonTitle: page.lesson_title,
+    bookTitle: (Array.isArray(books) ? books[0]?.title : books?.title) ?? "الكتاب",
+    objectives: l?.verified_at ? (l.learning_objectives ?? []) : [],
+  };
+}

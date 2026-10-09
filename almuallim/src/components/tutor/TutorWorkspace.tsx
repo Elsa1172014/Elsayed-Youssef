@@ -1,13 +1,16 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VerifiedAnswer } from "@/lib/tutor/answer";
-import type { BookOption, ChatMessage, SessionState } from "@/lib/tutor/client-types";
+import { mergeVoiceTranscript, type BookOption, type ChatMessage, type SessionState } from "@/lib/tutor/client-types";
+import { buildModeSwitchMessage } from "@/lib/tutor/prompt";
 import { type Level, type Mode } from "@/lib/tutor/types";
 import type { ConfirmedPage, RecognitionResult } from "@/lib/vision/client-types";
 import { AnswerView } from "./AnswerView";
 import { CameraPanel } from "./CameraPanel";
 import { LessonCard } from "./LessonCard";
 import { ModeTabs } from "./ModeTabs";
+import { useVoiceSession, supportsVoice } from "./useVoiceSession";
+import { VoicePanel } from "./VoicePanel";
 
 const LEVEL_AR: Record<Level, string> = { support: "دعم", core: "أساسي", challenge: "تحدٍّ" };
 let counter = 0;
@@ -27,6 +30,9 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
   const [confirmed, setConfirmed] = useState<ConfirmedPage | null>(null);
   const [visionBusy, setVisionBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const pageContextRef = useRef<string | null>(null);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  useEffect(() => setVoiceSupported(supportsVoice()), []);
 
   const book = books.find((b) => b.versionId === versionId) ?? null;
   const lesson = book?.lessons.find((l) => l.id === lessonId) ?? null;
@@ -48,9 +54,34 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
     return s;
   }, [session, versionId, lessonId, mode, level]);
 
+  const voice = useVoiceSession({
+    getSessionId: async () => (await ensureSession()).id,
+    getResumeContext: () => pageContextRef.current,
+  });
+  const voiceLive = voice.state.phase === "live";
+
+  // Fold the live voice transcript into the shared conversation log.
+  useEffect(() => {
+    if (voice.state.transcript.length) setMessages((m) => mergeVoiceTranscript(m, voice.state.transcript));
+  }, [voice.state.transcript]);
+
+  async function changeMode(m: Mode) {
+    setMode(m);
+    if (session) {
+      void fetch(`/api/sessions/${session.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: m }) }).catch(() => undefined);
+    }
+    if (voiceLive) voice.pushContext(buildModeSwitchMessage(m, level), { speak: false });
+  }
+
   async function send(text: string) {
     const t = text.trim();
     if (!t || busy) return;
+    if (voiceLive) {
+      // One conversation: typed input goes to the live voice session.
+      setDraft("");
+      voice.sendText(t);
+      return;
+    }
     setBusy(true);
     setError(null);
     setDraft("");
@@ -108,6 +139,9 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error?.message ?? "تعذّر تأكيد الصفحة");
       const ctx = j.context as ConfirmedPage;
+      pageContextRef.current = typeof j.contextMessage === "string" ? j.contextMessage : null;
+      // Live voice: hand the validated page to the tutor immediately — no reconnect, no restart.
+      if (pageContextRef.current) voice.pushContext(pageContextRef.current);
       setConfirmed(ctx);
       setRecognition(null);
       if (ctx.lessonId && book?.lessons.some((l) => l.id === ctx.lessonId)) {
@@ -173,15 +207,23 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
           onChange={() => { setConfirmed(null); setRecognition(null); }}
           onExplain={() => void send(`اشرح لي ما في الصفحة ${confirmed?.pageNumber ?? ""} من الدرس.`)}
         />
-        {/* Voice orb mounts in the conversation header (M4). */}
+        <VoicePanel
+          state={voice.state}
+          supported={voiceSupported}
+          disabled={noBooks}
+          onStart={() => void voice.start()}
+          onStop={() => void voice.stop()}
+          onMute={voice.setMuted}
+          onInterrupt={voice.interrupt}
+        />
       </aside>
 
       <section className="flex min-h-[32rem] flex-col rounded-2xl border border-line bg-surface" aria-label="المحادثة">
         <div className="space-y-3 border-b border-line p-4">
-          <ModeTabs value={mode} onChange={setMode} />
+          <ModeTabs value={mode} onChange={(m) => void changeMode(m)} />
         </div>
         <div ref={logRef} role="log" aria-live="polite" aria-label="سجل المحادثة" className="flex-1 space-y-4 overflow-y-auto p-4" style={{ maxHeight: "60vh" }}>
-          {messages.length === 0 && (
+          {messages.length === 0 && !voiceLive && (
             <p className="py-10 text-center text-muted">اكتب سؤالك عن الدرس، مثل: «ما هو الفاعل؟» أو اطلب تمرينًا.</p>
           )}
           {messages.map((m) => (
@@ -189,12 +231,13 @@ export function TutorWorkspace({ books }: { books: BookOption[] }) {
               <div className={`max-w-[90%] rounded-2xl px-4 py-3 ${m.role === "student" ? "bg-brand text-brand-ink" : "bg-bg ring-1 ring-line"}`}>
                 {m.role === "student" && <p>{m.text}</p>}
                 {m.role === "tutor" && <AnswerView answer={m.answer} />}
-                {m.role === "tutor-text" && <p>{m.text}</p>}
+                {m.role === "tutor-text" && <p className={m.final ? "" : "opacity-80"}>{m.text}{m.interrupted ? " …" : ""}</p>}
                 {m.role === "system" && <p className="text-sm text-muted">{m.text}</p>}
               </div>
             </div>
           ))}
           {busy && <p className="text-sm text-muted" aria-live="polite">المعلّم يبحث في الكتاب ويكتب…</p>}
+          {voiceLive && messages.length === 0 && <p className="py-6 text-center text-muted">المحادثة الصوتية تعمل — تحدّث وسيظهر النص هنا.</p>}
         </div>
         {error && (
           <div role="alert" className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">

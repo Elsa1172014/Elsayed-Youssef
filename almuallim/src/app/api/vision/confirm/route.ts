@@ -5,7 +5,7 @@ import { EnvError, serverEnv } from "@/lib/env";
 import { confirmPageSchema } from "@/lib/schemas/tutor";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildPageContextMessage } from "@/lib/tutor/context-message";
-import { appendEvent, loadTutorContext } from "@/lib/tutor/persist";
+import { appendEvent, loadPageContext, loadTutorContext } from "@/lib/tutor/persist";
 
 /**
  * The student's explicit confirmation of a page (from camera candidates or typed manually).
@@ -38,39 +38,36 @@ export async function POST(req: Request) {
     return json({ confirmed: false });
   }
 
-  const { data: rows, error } = await db.rpc("get_page_text", { p_book_version_id: loaded.ctx.versionId, p_page_number: pageNumber });
-  if (error) return apiError("internal", "تعذّر قراءة الصفحة");
-  const page = (rows as { page_number: number; printed_label: string | null; text: string; lesson_id: string | null; lesson_title: string | null }[] | null)?.[0];
+  let page;
+  try {
+    page = await loadPageContext(db, loaded.ctx.versionId, pageNumber);
+  } catch {
+    return apiError("internal", "تعذّر قراءة الصفحة");
+  }
   if (!page) return apiError("not_found", "هذه الصفحة غير موجودة في الكتاب");
 
   const { error: upErr } = await db
     .from("tutoring_sessions")
-    .update({ current_page: page.page_number, lesson_id: page.lesson_id ?? loaded.ctx.lessonId })
+    .update({ current_page: page.pageNumber, lesson_id: page.lessonId ?? loaded.ctx.lessonId })
     .eq("id", sessionId)
     .eq("student_id", profile.id);
   if (upErr) return apiError("internal", "تعذّر تحديث الجلسة");
 
-  const [{ data: bv }, { data: lesson }] = await Promise.all([
-    db.from("book_versions").select("books(title)").eq("id", loaded.ctx.versionId).single(),
-    page.lesson_id ? db.from("lessons").select("learning_objectives, verified_at").eq("id", page.lesson_id).single() : Promise.resolve({ data: null }),
-  ]);
-  const books = (bv as { books: { title: string } | { title: string }[] | null } | null)?.books;
-  const bookTitle = (Array.isArray(books) ? books[0]?.title : books?.title) ?? "الكتاب";
-  const l = lesson as { learning_objectives: string[]; verified_at: string | null } | null;
-  const objectives = l?.verified_at ? (l.learning_objectives ?? []) : []; // only teacher-verified objectives are surfaced
-
-  await appendEvent(db, sessionId, { type: "page_confirmed", payload: { pageNumber: page.page_number, source, lessonId: page.lesson_id } }, true);
+  await appendEvent(db, sessionId, { type: "page_confirmed", payload: { pageNumber: page.pageNumber, source, lessonId: page.lessonId } }, true);
 
   return json({
     confirmed: true,
     context: {
-      pageNumber: page.page_number,
-      printedLabel: page.printed_label,
-      lessonId: page.lesson_id,
-      lessonTitle: page.lesson_title,
-      bookTitle,
-      objectives,
+      pageNumber: page.pageNumber,
+      printedLabel: page.printedLabel,
+      lessonId: page.lessonId,
+      lessonTitle: page.lessonTitle,
+      bookTitle: page.bookTitle,
+      objectives: page.objectives,
     },
-    contextMessage: buildPageContextMessage({ bookTitle, lessonTitle: page.lesson_title, pageNumber: page.page_number, printedLabel: page.printed_label, pageText: page.text, objectives }),
+    contextMessage: buildPageContextMessage({
+      bookTitle: page.bookTitle, lessonTitle: page.lessonTitle, pageNumber: page.pageNumber,
+      printedLabel: page.printedLabel, pageText: page.text, objectives: page.objectives,
+    }),
   });
 }

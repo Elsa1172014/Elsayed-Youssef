@@ -15,6 +15,7 @@ const serverSchema = publicSchema.extend({
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   REALTIME_MODEL: z.string().default("gpt-realtime"),
   REALTIME_VOICE: z.string().default("marin"),
+  REALTIME_TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
   RATE_LIMIT_CHAT_PER_MIN: num(20),
   RATE_LIMIT_VISION_PER_MIN: num(6),
   RATE_LIMIT_REALTIME_TOKEN_PER_HOUR: num(10),

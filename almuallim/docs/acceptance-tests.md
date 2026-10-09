@@ -49,9 +49,9 @@ Commands: `npm test` (unit) · `npm run test:db` (real PostgreSQL+pgvector; star
 ## E. Voice
 | ID | Requirement | Verification | Status |
 |---|---|---|---|
-| E1 | FSM: start/stop, mute, reconnect with backoff, error states, mic denied | Auto (M4, fake transport) | ⬜ |
-| E2 | Token endpoint requires auth, rate-limited, never returns permanent key | Auto (M4, mocked fetch) | ⬜ |
-| E3 | Page recognised during live session updates context without reconnect | Auto (M4, fake transport) | ⬜ |
+| E1 | FSM: start/stop, mute, barge-in, tool calls, reconnect with backoff/offline wait, idle & max-duration limits, mic released on every terminal path, mic-denied/missing/busy/insecure, provider errors | Auto `voice-client.test.ts`, `webrtc-transport.test.ts`, `voice-ui.test.tsx` | ✅ (logic) |
+| E2 | Token endpoint: auth, ownership, rate limit, daily voice budget, abandoned-segment accounting; returns only the short-lived secret; session body contains tools + page context | Auto `voice-routes.test.ts` (mocked provider HTTP) | ✅ (against mock) · 🟡 real provider |
+| E3 | Confirmed page is pushed into the live session (system item + response.create) without reconnect; mode switches likewise | Auto `voice-client.test.ts`, `voice-ui.test.tsx` | ✅ (logic) |
 | E4 | Real spoken Arabic conversation, barge-in works, transcript saved | Manual 🟡 (OpenAI key, microphone, desktop Chrome + iOS Safari + Android Chrome) | ⬜ |
 
 ## F. Teacher dashboard & UI
