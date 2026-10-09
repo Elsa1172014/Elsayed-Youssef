@@ -130,11 +130,12 @@ describe("AI estimate vs teacher validation", () => {
 
 describe("textbook access control", () => {
   it("students cannot read raw pages/chunks, but admins and teachers can", async () => {
-    expect((await as(db, authed(U.s1), (q) => q("select id from content_chunks"))).rowCount).toBe(0);
-    expect((await as(db, authed(U.t1), (q) => q("select id from content_chunks"))).rowCount).toBe(3);
+    const mine = "select id from content_chunks where book_version_id in ($1,$2)";
+    expect((await as(db, authed(U.s1), (q) => q(mine, [F.vReady, F.vProc]))).rowCount).toBe(0);
+    expect((await as(db, authed(U.t1), (q) => q(mine, [F.vReady, F.vProc]))).rowCount).toBe(3);
   });
   it("students only see READY versions", async () => {
-    const r = await as(db, authed(U.s1), (q) => q("select id from book_versions"));
+    const r = await as(db, authed(U.s1), (q) => q("select id from book_versions where book_id=$1", [F.book]));
     expect(r.rows.map((x) => x.id)).toEqual([F.vReady]);
   });
   it("only admins write books", async () => {

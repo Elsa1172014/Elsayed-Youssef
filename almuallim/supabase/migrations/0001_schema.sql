@@ -85,6 +85,7 @@ create table public.book_pages (
   text text not null default '',
   text_normalized text not null default '',
   has_text boolean not null default false,
+  text_source text not null default 'text_layer' check (text_source in ('text_layer', 'ocr')),
   image_path text,                                          -- bucket "page-images"
   embedding vector(1536),
   content_hash text,

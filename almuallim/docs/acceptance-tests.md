@@ -22,16 +22,16 @@ Commands: `npm test` (unit) · `npm run test:db` (real PostgreSQL+pgvector; star
 | ID | Requirement | Verification | Status |
 |---|---|---|---|
 | B1 | Enqueue idempotent; concurrent workers never double-claim; lease expiry resumes; backoff; terminal failure surfaces error | Auto `test:db` queue.test.ts | ✅ |
-| B2 | PDF → per-page text/page numbers on a generated Arabic PDF | Auto (M1) | ⬜ |
-| B3 | Lesson boundaries detected from outline and from headings; fallback to whole-document | Auto (M1) | ⬜ |
-| B4 | Chunks never cross lesson boundaries, keep page ranges, stable hashes | Auto (M1) | ⬜ |
-| B5 | Re-running a job leaves identical rows (idempotent) | Auto (M1) | ⬜ |
+| B2 | PDF → per-page text/page numbers on a generated Arabic PDF | Auto `tests/unit/extract.test.ts` | ✅ |
+| B3 | Lesson boundaries detected from outline and from headings; fallback to whole-document | Auto `tests/unit/lessons.test.ts` | ✅ |
+| B4 | Chunks never cross lesson boundaries, keep page ranges, stable hashes | Auto `tests/unit/chunk.test.ts` | ✅ |
+| B5 | Re-running a job leaves identical rows (idempotent); resumes after provider outage; checksum mismatch & scanned PDFs fail non-retryably; lease loss abandons job | Auto `test:db` ingestion.test.ts | ✅ |
 | B6 | Real textbook PDF ingested end to end with embeddings | Manual 🟡 (needs OpenAI key + licensed PDF) | ⬜ |
 
 ## C. Retrieval, tutoring
 | ID | Requirement | Verification | Status |
 |---|---|---|---|
-| C1 | Arabic normalisation (diacritics, alef/ya/ta marbuta, digits) | Auto (M1) | ⬜ |
+| C1 | Arabic normalisation (diacritics, alef/ya/ta marbuta, digits, presentation forms, visual-order repair) | Auto `tests/unit/normalize.test.ts` | ✅ |
 | C2 | Hybrid search returns lexical and semantic hits fused | Auto `test:db` (synthetic vectors) | ✅ |
 | C3 | Grounding gate refuses below confidence threshold | Auto (M2) | ⬜ |
 | C4 | Quotes not found in cited chunk are rejected | Auto (M2) | ⬜ |
