@@ -301,6 +301,27 @@ begin
    limit lim;
 end $$;
 
+-- Single page of text for tutoring context (READY versions only; staff may read any). One page per call:
+-- bulk export is prevented by call-by-call rate limiting in the application layer.
+create or replace function public.get_page_text(p_book_version_id uuid, p_page_number integer)
+returns table (page_number integer, printed_label text, text text, lesson_id uuid, lesson_title text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'authentication required' using errcode = '42501';
+  end if;
+  return query
+  select p.page_number, p.printed_label, p.text,
+         (select l.id from public.lessons l where l.book_version_id = p.book_version_id
+            and p.page_number between l.start_page and l.end_page order by l.ordinal limit 1),
+         (select l.title from public.lessons l where l.book_version_id = p.book_version_id
+            and p.page_number between l.start_page and l.end_page order by l.ordinal limit 1)
+    from public.book_pages p
+    join public.book_versions bv on bv.id = p.book_version_id
+   where p.book_version_id = p_book_version_id and p.page_number = p_page_number
+     and (bv.status = 'ready' or public.is_staff());
+end $$;
+
 -- ───────────────────────────── session events ─────────────────────────────
 -- Security INVOKER: row-level security applies, so only the owning student can append.
 create or replace function public.append_session_event(
@@ -349,6 +370,8 @@ revoke all on function public.rate_limit_hit(text, integer, integer) from public
 revoke all on function public.usage_sum(uuid, text, timestamptz) from public, anon, authenticated;
 revoke all on function public.search_content(vector, text, uuid, uuid, integer) from public, anon;
 revoke all on function public.match_pages(vector, text, uuid, integer) from public, anon;
+revoke all on function public.get_page_text(uuid, integer) from public, anon;
+grant execute on function public.get_page_text(uuid, integer) to authenticated, service_role;
 grant execute on function public.search_content(vector, text, uuid, uuid, integer) to authenticated, service_role;
 grant execute on function public.match_pages(vector, text, uuid, integer) to authenticated, service_role;
 grant execute on function public.enqueue_ingestion(uuid, uuid, boolean) to service_role;

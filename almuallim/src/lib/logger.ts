@@ -3,7 +3,8 @@ type Level = "debug" | "info" | "warn" | "error";
 const ORDER: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
 // Keys whose values must never be logged (secrets and student/book content).
-const REDACT = /(authorization|cookie|token|secret|api[-_]?key|password|apikey|transcript|content|text|prompt|response|audio|image|frame|email)/i;
+// Note: `tokens`/`totalTokens` (usage counters) are intentionally NOT redacted; credential tokens are.
+const REDACT = /(authorization|cookie|secret|api[-_]?key|password|(^|[_-])token$|^token$|access_?token|refresh_?token|transcript|content|text|prompt|response|audio|image|frame|email)/i;
 
 export function redact(value: unknown, depth = 0): unknown {
   if (value == null || depth > 4) return value;

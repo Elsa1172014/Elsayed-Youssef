@@ -24,7 +24,9 @@ export function fakeDb(opts: { user: { id: string } | null; handler: Handler; rp
       in: (k: string, v: unknown) => ((filters[k] = v), chain),
       order: () => chain,
       limit: () => chain,
+      is: (k: string, v: unknown) => ((filters[k] = v), chain),
       single: () => exec(),
+      maybeSingle: () => exec(),
       then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => exec().then(res, rej),
     };
     return chain;

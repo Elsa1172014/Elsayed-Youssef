@@ -153,3 +153,30 @@ describe("ingestion pipeline on real PostgreSQL + the real PDF fixture", () => {
     expect((await db.query("select status, locked_by from ingestion_jobs where id=$1", [job.id])).rows[0]).toEqual({ status: "running", locked_by: "thief" });
   });
 });
+
+describe("retrieval over ingested content (real PostgreSQL)", () => {
+  it("lexical query expansion finds 'الفاعل' from a bare 'فاعل' even when the vector says nothing", async () => {
+    const { lexicalQueryText } = await import("@/lib/retrieval/lexical");
+    const { v, path } = await newVersion("sample-textbook.pdf");
+    await enqueueAndRun(v, mkPorts({ [path]: "sample-textbook.pdf" }));
+    const unrelated = toVectorLiteral(makeFakeEmbedding("zzz qqq www"));
+    const r = await as(db, service, (q) => q("select lesson_title, lexical_score from search_content($1::vector, $2, $3, null, 3)", [unrelated, lexicalQueryText("فاعل"), v]));
+    expect(r.rows[0].lesson_title).toContain("الفاعل");
+    expect(Number(r.rows[0].lexical_score)).toBeGreaterThan(0);
+  });
+
+  it("get_page_text: students read pages of READY versions only; anon cannot", async () => {
+    const { v, path } = await newVersion("sample-textbook.pdf");
+    const student = randomUUID();
+    await db.query("insert into auth.users (id) values ($1)", [student]);
+    // not ready yet → nothing
+    const before = await as(db, { sub: student, role: "authenticated" }, (q) => q("select * from get_page_text($1, 2)", [v]));
+    expect(before.rowCount).toBe(0);
+    await enqueueAndRun(v, mkPorts({ [path]: "sample-textbook.pdf" }));
+    const after = await as(db, { sub: student, role: "authenticated" }, (q) => q("select * from get_page_text($1, 2)", [v]));
+    expect(after.rowCount).toBe(1);
+    expect(after.rows[0].text).toContain("الفاعل اسم مرفوع");
+    expect(after.rows[0].lesson_title).toContain("الفاعل");
+    await expect(as(db, { sub: null, role: "anon" }, (q) => q("select * from get_page_text($1, 2)", [v]))).rejects.toThrow(/permission denied/);
+  });
+});

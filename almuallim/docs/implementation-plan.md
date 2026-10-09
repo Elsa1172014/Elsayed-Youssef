@@ -12,7 +12,7 @@ One licensed textbook → ingested → one lesson → camera page recognition �
 |---|---|---|---|
 | M0 | Foundation | Inspect repo; Next.js/TS/Tailwind RTL scaffold; architecture, plan, acceptance docs, env example; PostgreSQL schema, functions, RLS, storage; DB tests on real Postgres+pgvector | ✅ schema/RLS/queue/search verified by 31 DB tests; `next build` ✅ |
 | M1 | Ingestion | Arabic normalisation; PDF extract → pages; lesson boundaries; chunking; embeddings adapter; worker with leases/retries/idempotency; admin upload + status UI & API | ✅ pipeline verified end-to-end on real Postgres with a real (Chromium-generated) Arabic PDF; 🟡 worker process, Supabase Storage, OpenAI embeddings, signed upload NOT run against live services |
-| M2 | Retrieval + tutor | Hybrid retrieval client; grounding gate; citation verifier; AI SDK tutor with tools; 5 modes; text chat UI | ⬜ |
+| M2 | Retrieval + tutor | Hybrid retrieval client; grounding gate; citation verifier; AI SDK tutor with tools; 5 modes; text chat UI | ✅ logic, guards, routes and UI behaviour verified with a scripted model (`ai/test`) and jsdom; 🟡 real LLM answers/tool use and grounding thresholds NOT verified (no OpenAI key) |
 | M3 | Camera + page matching | getUserMedia FSM; stability detector; `/api/vision/recognize`; `decideMatch`; confirm flow; lesson card | ⬜ |
 | M4 | Realtime voice | Token endpoint; `RealtimeVoiceClient` FSM + WebRTC transport; transcripts; reconnect; vision→voice context push; tool endpoint | ⬜ (needs `OPENAI_API_KEY` to verify live) |
 | M5 | Persistence + teacher dashboard | Sessions/events/responses/mastery writes; AI-vs-teacher labelling; dashboard (progress, strengths, gaps, interventions) | ⬜ |

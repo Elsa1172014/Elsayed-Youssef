@@ -33,10 +33,10 @@ Commands: `npm test` (unit) · `npm run test:db` (real PostgreSQL+pgvector; star
 |---|---|---|---|
 | C1 | Arabic normalisation (diacritics, alef/ya/ta marbuta, digits, presentation forms, visual-order repair) | Auto `tests/unit/normalize.test.ts` | ✅ |
 | C2 | Hybrid search returns lexical and semantic hits fused | Auto `test:db` (synthetic vectors) | ✅ |
-| C3 | Grounding gate refuses below confidence threshold | Auto (M2) | ⬜ |
-| C4 | Quotes not found in cited chunk are rejected | Auto (M2) | ⬜ |
-| C5 | Assessment/practice never reveal the full answer without student attempt | Auto (M2) | ⬜ |
-| C6 | Tool inputs are Zod-validated; unauthorised session ids rejected | Auto (M2) | ⬜ |
+| C3 | Grounding capped by retrieval confidence; ungrounded/partial answers carry a visible notice (thresholds uncalibrated) | Auto `tests/unit/retrieval.test.ts`, `tutor-answer.test.ts`, `tutor-engine.test.ts` | ✅ (logic) · 🟡 calibration on real book |
+| C4 | Quotes not found in the cited chunk are rejected | Auto `tutor-answer.test.ts`, `tutor-engine.test.ts` | ✅ |
+| C5 | Practice/assessment/socratic: answer-leak guard (one corrective retry, then safe fallback). Relies on the model's self-declared flag — defence in depth, not proof | Auto `tutor-engine.test.ts` | ✅ (mechanism) · 🟡 real-model behaviour |
+| C6 | Tool inputs Zod-validated; foreign sessions rejected; rate-limit/budget before provider call; transcript opt-out honoured | Auto `chat-route.test.ts`, `admin-routes.test.ts` | ✅ |
 
 ## D. Camera / page matching
 | ID | Requirement | Verification | Status |

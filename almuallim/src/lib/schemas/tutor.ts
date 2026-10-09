@@ -1,0 +1,23 @@
+import { z } from "zod";
+import { levelSchema, modeSchema } from "@/lib/tutor/types";
+
+export const createSessionSchema = z.object({
+  mode: modeSchema.default("explain"),
+  level: levelSchema.default("core"),
+  versionId: z.string().uuid().nullable().default(null),
+  lessonId: z.string().uuid().nullable().default(null),
+  objective: z.string().trim().max(500).nullable().default(null),
+  channel: z.enum(["text", "voice"]).default("text"),
+});
+
+export const chatSchema = z.object({
+  sessionId: z.string().uuid(),
+  text: z.string().trim().min(1).max(2000),
+  mode: modeSchema.optional(),
+});
+
+export const patchSessionSchema = z.object({
+  mode: modeSchema.optional(),
+  level: levelSchema.optional(),
+  status: z.literal("ended").optional(),
+});
