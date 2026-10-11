@@ -33,9 +33,26 @@ export interface CatalogEntry {
   id: string;
   name: string;
   country?: string;
+  languages: string[];
   categories: string[];
   provenance: string;
-  streams: { status: string }[];
+  streams: { url: string; status: string }[];
+}
+export interface CatalogFilter {
+  q?: string;
+  country?: string;
+  category?: string;
+  language?: string;
+}
+export interface Facet {
+  value: string;
+  count: number;
+}
+export interface Facets {
+  countries: Facet[];
+  categories: Facet[];
+  languages: Facet[];
+  total: number;
 }
 
 let token = "";
@@ -117,7 +134,16 @@ export const api = {
   editSource: (id: string, patch: { name?: string; enabled?: boolean }) => call<Source>(`/v1/me/sources/${id}`, json("PATCH", patch)),
   deleteSource: (id: string) => call<void>(`/v1/me/sources/${id}`, json("DELETE")),
   syncSource: (id: string) => call<{ added?: number; programmes?: number }>(`/v1/me/sources/${id}/sync`, json("POST")),
-  catalog: (q: string) => call<CatalogEntry[]>(`/v1/catalog?q=${encodeURIComponent(q)}`),
+  catalog: async (f: CatalogFilter, offset = 0) => {
+    const qs = new URLSearchParams({ offset: String(offset), limit: "50" });
+    for (const [k, v] of Object.entries(f)) if (v) qs.set(k, v);
+    const res = await fetch(`${base}/v1/catalog?${qs}`, { headers: { authorization: `Bearer ${token}` } });
+    if (res.status === 401) onUnauthorized();
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    return { items: (await res.json()) as CatalogEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
+  },
+  facets: () => call<Facets>("/v1/catalog/facets"),
+  importCatalog: (f: CatalogFilter, limit = 20000) => call<{ added: number; skipped: number }>("/v1/catalog/import", json("POST", { ...f, limit })),
   addFromCatalog: (id: string) => call<Channel>(`/v1/catalog/${encodeURIComponent(id)}/add`, json("POST")),
   clearHistory: () => call<void>("/v1/me/watch-events", json("DELETE")),
 };

@@ -9,6 +9,7 @@ const dict = {
     suggested: "Suggested guide matches", legal: "Free, legal channels only: official broadcasts, free ad-supported channels, open directories, and sources you own.",
     signOut: "Sign out", signIn: "Sign in", register: "Create account", username: "Username", password: "Password", newPassword: "New password (min 10 characters)",
     changePassword: "Change password", deleteAccount: "Delete my account and data", confirmPassword: "Your password",
+    country: "Country", category: "Category", language: "Language", channelsFound: "free channels", addAll: "Add all to my channels", added: "added", skipped: "already there", more: "Show more",
     name: "Name", url: "URL", type: "Type", importM3U: "Import M3U", importEpg: "Import XMLTV guide",
   },
   ar: {
@@ -19,6 +20,7 @@ const dict = {
     suggested: "ربط مقترح بالدليل", legal: "قنوات مجانية وقانونية فقط: البث الرسمي، والقنوات المجانية الممولة بالإعلانات، والأدلة المفتوحة، ومصادرك الخاصة.",
     signOut: "تسجيل الخروج", signIn: "تسجيل الدخول", register: "إنشاء حساب", username: "اسم المستخدم", password: "كلمة المرور", newPassword: "كلمة مرور جديدة (10 أحرف على الأقل)",
     changePassword: "تغيير كلمة المرور", deleteAccount: "حذف حسابي وبياناتي", confirmPassword: "كلمة مرورك",
+    country: "الدولة", category: "الفئة", language: "اللغة", channelsFound: "قناة مجانية", addAll: "أضف الكل إلى قنواتي", added: "أُضيفت", skipped: "موجودة مسبقاً", more: "عرض المزيد",
     name: "الاسم", url: "الرابط", type: "النوع", importM3U: "استيراد M3U", importEpg: "استيراد دليل XMLTV",
   },
 };

@@ -28,3 +28,5 @@ li.cat { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0
 .login form { display: grid; gap: 12px; }
 button.link { background: none; border: 0; color: #4c8dff; cursor: pointer; text-align: start; padding: 0; }
 .account { display: grid; gap: 8px; max-width: 360px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.filters input { flex: 1; min-width: 160px; }

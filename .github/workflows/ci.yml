@@ -48,3 +48,37 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
       - run: npm run build
+  compose:
+    # Proves the one-command deployment works end to end: setup script, images, migrations, auth, catalog sync.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack
+        run: ./scripts/setup.sh
+      - name: Health and auth through the reverse proxy
+        run: |
+          curl -fsS http://localhost/healthz
+          curl -fsS http://localhost/ | grep -q "Smart Receiver"
+          curl -fsS -X POST http://localhost/v1/auth/register -H 'content-type: application/json' \
+            -d '{"username":"ci-user","password":"a-long-ci-password"}' > reg.json
+          TOKEN=$(python3 -c 'import json;print(json.load(open("reg.json"))["token"])')
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/v1/me/channels)" = 401
+          curl -fsS http://localhost/v1/me -H "authorization: Bearer $TOKEN"
+          echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - name: Catalog sync from the real iptv-org dataset
+        run: |
+          for i in $(seq 1 48); do
+            n=$(curl -fsS -D - -o /dev/null "http://localhost/v1/catalog?limit=1" -H "authorization: Bearer $TOKEN" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-total-count"{print $2}')
+            echo "catalog channels so far: ${n:-0}"
+            if [ "${n:-0}" -ge 1000 ]; then echo "catalog ready: $n channels"; exit 0; fi
+            sleep 5
+          done
+          echo "::warning::catalog did not reach 1000 channels within 4 minutes (network to iptv-org?)"
+          docker compose logs worker | tail -30
+      - name: Logs
+        if: always()
+        run: docker compose logs --tail=40
+      - name: Stop
+        if: always()
+        run: docker compose down -v

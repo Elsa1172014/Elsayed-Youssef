@@ -62,7 +62,8 @@ export function App() {
 
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
-    return hits ? hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c) : list;
+    if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
+    return list.slice(0, 500); // thousands of channels: search or filter to find the rest
   }, [channels, hits]);
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;

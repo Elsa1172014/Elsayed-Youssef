@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type CatalogEntry, type Channel, type Grid, type Source, type Suggestion } from "./api";
+import { api, type CatalogEntry, type CatalogFilter, type Channel, type Facet, type Facets, type Grid, type Source, type Suggestion } from "./api";
 import type { Strings } from "./i18n";
 
 type Run = (fn: () => Promise<unknown>) => Promise<void>;
@@ -32,24 +32,49 @@ export function GuideView({ channels }: { channels: Channel[] }) {
 }
 
 export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh: () => Promise<unknown> }) {
-  const [q, setQ] = useState("");
+  const [f, setF] = useState<CatalogFilter>({});
+  const [facets, setFacets] = useState<Facets | null>(null);
   const [items, setItems] = useState<CatalogEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [result, setResult] = useState("");
+  useEffect(() => { void api.facets().then(setFacets).catch(() => setFacets(null)); }, []);
   useEffect(() => {
-    const h = setTimeout(() => void api.catalog(q).then(setItems).catch(() => setItems([])), 250);
+    const h = setTimeout(() => void api.catalog(f).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => setItems([])), 250);
     return () => clearTimeout(h);
-  }, [q]);
+  }, [f]);
+  const sel = (key: keyof CatalogFilter, label: string, list: Facet[] | undefined) => (
+    <select aria-label={label} value={f[key] ?? ""} onChange={(e) => setF({ ...f, [key]: e.target.value || undefined })}>
+      <option value="">{label}</option>
+      {(list ?? []).map((x) => <option key={x.value} value={x.value}>{x.value} ({x.count})</option>)}
+    </select>
+  );
   return (
     <div>
       <p className="hint">{s.legal}</p>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={s.search} />
+      <div className="filters">
+        <input value={f.q ?? ""} onChange={(e) => setF({ ...f, q: e.target.value || undefined })} placeholder={s.search} />
+        {sel("country", s.country, facets?.countries)}
+        {sel("category", s.category, facets?.categories)}
+        {sel("language", s.language, facets?.languages)}
+      </div>
+      <p>
+        <strong>{total.toLocaleString()}</strong> {s.channelsFound}{" "}
+        <button disabled={total === 0} onClick={() => {
+          if (!window.confirm(`${s.addAll}: ${Math.min(total, 20000)}?`)) return;
+          void run(async () => { const r = await api.importCatalog(f); setResult(`${r.added} ${s.added}, ${r.skipped} ${s.skipped}`); await refresh(); });
+        }}>{s.addAll}</button>{" "}<span className="hint">{result}</span>
+      </p>
       <ul>
         {items.map((c) => (
           <li key={c.id} className="cat">
-            <span><strong>{c.name}</strong> <small>{[c.country, c.categories[0], c.provenance].filter(Boolean).join(" · ")}</small></span>
+            <span><strong>{c.name}</strong> <small>{[c.country, c.categories[0], c.languages[0]].filter(Boolean).join(" · ")}</small></span>
             <button onClick={() => void run(async () => { await api.addFromCatalog(c.id); await refresh(); })}>{s.addToMine}</button>
           </li>
         ))}
       </ul>
+      {items.length < total && (
+        <button onClick={() => void api.catalog(f, items.length).then((r) => setItems([...items, ...r.items])).catch(() => undefined)}>{s.more}</button>
+      )}
     </div>
   );
 }

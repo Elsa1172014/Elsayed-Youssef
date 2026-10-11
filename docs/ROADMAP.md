@@ -23,14 +23,14 @@ Work ships as small reviewed pull requests with tests.
 
 ---
 
-> **Progress (live)** — authentication is implemented as username + password (owner decision): scrypt hashes, revocable sessions, rate limiting, password change, account deletion.
-> - **Done, tested:** M3U/XMLTV/Xtream parsing, SSRF-safe fetching, encrypted source credentials, Postgres schema + store (tested on PGlite, a real Postgres engine), user sources/channels CRUD with ownership attestation and additive re-sync (user edits are never overwritten), M3U import/export, multi-source EPG merge by priority, now/next + time-window grid, free catalog (iptv-org mapper, curated-official loader, takedown flag), stream health probing and ranking, hybrid lexical + embedding search, recommendations, EPG auto-mapping suggestions, history deletion.
-> - **Done, builds:** web app (live, guide, catalog, manage; AR/EN with RTL).
-> - **Packaged, unverified on devices:** Tizen and webOS staging (`apps/package-tv.sh`).
-> - **Source skeletons, not compiled here:** Android/Android TV (Compose + Media3), iOS/tvOS (SwiftUI + AVPlayer).
-> - **Blocked on the owner:** hosting; store/developer accounts and signing certificates; a verified official/FAST channel list (`catalog/official.json` is empty by design); network access to iptv-org from the build environment (the sync job is covered by fixtures only).
-> - **Not started:** real-model embeddings (pluggable interface exists; default is a hashing embedder), pgvector at catalog scale, FTA tuner integration (HDHomeRun/TVHeadend), cross-device sync/change log, parental controls, casting, TV-native player adapters (AVPlay), admin console.
-> - See [DEPLOYMENT.md](./DEPLOYMENT.md) for release blockers.
+> **Progress (live)**
+> - **Distribution decision (owner):** one web app/PWA for every device. App-store and TV-store publishing is **cancelled** (no Apple/Google/Samsung/LG accounts needed).
+> - **Done, tested:** username/password auth (scrypt, revocable sessions, rate limits, account deletion); Postgres store with migrations; M3U/XMLTV/Xtream sources with encrypted credentials and additive re-sync; SSRF-safe fetching; **full iptv-org catalog sync verified on the real dataset (9,537 channels, 14.8k streams, 178 countries; blocklist honored, adult/closed/header-dependent entries excluded, upstream removals retired)**; filters by country/category/language and one-click bulk import; stream health probing; multi-source EPG; hybrid search; recommendations; EPG auto-map suggestions.
+> - **Done, verified in a real browser under the production CSP:** web app (live, guide, free channels, manage; AR/EN RTL; PWA manifest).
+> - **One-command deployment:** `./scripts/setup.sh` (Docker Compose: Postgres + API + background worker + Caddy with automatic HTTPS). CI runs the whole stack end to end.
+> - **Optional, not on the release path:** Android and iOS source skeletons.
+> - **Blocked on the owner:** actually running it somewhere (see [DEPLOYMENT.md](./DEPLOYMENT.md)); a verified official/FAST channel list (`catalog/official.json` is empty by design).
+> - **Not started:** real-model embeddings (interface ready), pgvector at catalog scale, FTA tuner integration, cross-device sync, parental controls, opt-in stream relay for CORS/mixed-content cases, password recovery.
 
 ---
 
@@ -57,13 +57,13 @@ Work ships as small reviewed pull requests with tests.
 **Deliverables**
 - **Android / Android TV** (Kotlin, Compose, Media3) with TV Input/Channels integration.
 - **iOS / tvOS** (SwiftUI, AVPlayer) with PiP.
-- **Samsung Tizen and LG webOS** packages of the web app with native player adapters and remote-key mapping.
+- ~~Samsung Tizen / LG webOS / store packages~~ — cancelled (web-only distribution); TV-browser remote-key and focus handling stays in scope.
 - Xtream Codes support for user-owned accounts (live categories first).
 - Favourites, recent channels, parental controls, multi-profile.
-- Failover between candidate streams; client QoE telemetry; store-release pipelines (fastlane, Tizen/webOS packaging).
+- Failover between candidate streams; client QoE telemetry.
 - FTA tuner integration via HDHomeRun/TVHeadend/SAT>IP on LAN and Android TV tuner (no CA/decryption).
 
-**Exit criteria:** apps pass store review checklists on all five targets; cold start to first frame within budget on reference devices.
+**Exit criteria:** the web app works on current Chrome, Safari, Firefox and at least two smart-TV browsers; cold start to first frame within budget.
 
 ---
 
@@ -123,7 +123,7 @@ Work ships as small reviewed pull requests with tests.
 | Risk | Mitigation |
 |---|---|
 | Directory/FAST streams change or die | Health checker, multi-candidate failover, quick catalog refresh |
-| Platform store policies on IPTV apps | Ship as a *player/guide* with no bundled unlicensed content; clear terms and attestation |
-| Fragmented TV hardware | Early reference-device matrix, native players on Tizen/Android TV |
+| Many free streams fail in a browser (HTTP on HTTPS pages, missing CORS) | HTTPS-first stream selection, health checks, native HLS where available; optional opt-in relay later |
+| Fragmented TV browsers | Reference-browser matrix; native HLS path; focus/remote-key handling |
 | AI cost/latency | Caching, small models for parsing/embeddings, strict budgets |
 | EPG mismatches | Fuzzy auto-map plus user override |

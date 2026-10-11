@@ -41,10 +41,10 @@ This is an architectural requirement, not a footnote. The system is designed so 
 ```mermaid
 flowchart LR
   subgraph Clients
-    TV[Smart TV: Tizen / webOS / Android TV]
-    IOS[iOS / tvOS]
-    AND[Android / Android TV]
-    WEB[Web PWA]
+    TV[Smart TV browser]
+    IOS[iPhone / iPad browser]
+    AND[Android browser]
+    WEB[Desktop browser PWA]
   end
   subgraph Edge
     GW[API Gateway / BFF]
@@ -88,19 +88,19 @@ Key principle: **clients play streams directly from the source**. The backend is
 
 ## 4. Frontend
 
-### 4.1 Shared strategy
+### 4.1 Distribution decision: one web app, no app stores
 
-A monorepo (`pnpm` + Turborepo) with a shared TypeScript core and per-platform shells.
+**Decision (owner, 2026-10):** the product is distributed as a **web app / PWA** that opens on any device with a modern browser (smart-TV browsers, phones, tablets, computers). App-store and TV-store publishing (Apple, Google Play, Samsung, LG) is **cancelled**; no store accounts or signing certificates are part of the release path. Users can still "install" the PWA to a home screen.
 
-| Platform | Technology | Player | Notes |
+| Surface | Technology | Player | Notes |
 |---|---|---|---|
-| Web (PWA) | React + Vite + TypeScript, TanStack Query, Zustand | hls.js, dash.js (or Shaka Player for both + DRM) | Also the base for TV web apps |
-| Samsung Tizen | Web app reusing the React build, Tizen Studio packaging | AVPlay (native, preferred) with Shaka fallback | Spatial navigation library, 10-foot UI |
-| LG webOS | Web app reusing the React build, `ares-cli` packaging | webOS native `<video>` + Shaka | Magic-remote pointer support |
-| Android / Android TV | Kotlin, Jetpack Compose (+ Compose for TV), Hilt | Media3 / ExoPlayer (HLS, DASH, Widevine) | Leanback-style navigation, Android TV Channels API |
-| iOS / tvOS | Swift, SwiftUI, AVFoundation / AVPlayer (HLS, FairPlay) | AVPlayer | tvOS focus engine; Picture-in-Picture on iOS |
+| Web / PWA (all devices) | React + Vite + TypeScript | Native HLS (`<video>`) where supported (Safari, iOS, many TV browsers), hls.js elsewhere | One codebase; AR/EN with RTL |
+| Android / iOS native (`apps/android`, `apps/ios`) | Kotlin + Compose / Swift + SwiftUI | Media3 / AVPlayer | **Optional source skeletons, not on the release path** (sideload/TestFlight only if the owner ever wants them) |
 
-**Alternative to evaluate in Phase 1:** React Native (with `react-native-tvos`) to share more UI between iOS/Android/tvOS/Android TV. Recommendation: start native for the two mobile/TV stores where player quality matters most (Media3, AVPlayer), keep the web build for Tizen/webOS, and share *logic* (API client, models, EPG parsing) through generated OpenAPI clients plus a Kotlin Multiplatform or TS core. Revisit after MVP metrics.
+**Web-delivery limits to know (inherent, not bugs):**
+- Browsers play a stream only over a matching security level: an HTTPS site cannot play `http://` streams (mixed content). The importer therefore prefers HTTPS streams.
+- hls.js (Chrome/Firefox/Edge) needs the stream origin to send CORS headers; many free streams do not. Safari/iOS and most TV browsers use native HLS, which does not need CORS. Streams that fail in one browser may work in another.
+- Fixing both would require relaying media through our server. That is deliberately **not** built: it costs bandwidth, and the platform's rule is that the backend never relays streams. An opt-in relay for official/FAST streams could be added later.
 
 ### 4.2 Shared UI modules (all platforms)
 
@@ -233,7 +233,7 @@ Users can override EPG mapping per channel (and add their own XMLTV URL), so the
 - **Hybrid retrieval:** Postgres full-text / OpenSearch (BM25) + embeddings (pgvector) over channel names, descriptions, programme titles/synopses, categories, languages.
 - **Natural-language queries** ("Arabic news live now", "football tonight", "kids cartoons in English"): an LLM parses intent into structured filters (language, country, genre, live-now, time window), then runs hybrid retrieval and reranks.
 - **Arabic-first NLP:** normalization (diacritics, alef/ya/ta marbuta variants), transliteration matching ("الجزيرة" ↔ "Al Jazeera"), embeddings from a multilingual model (e.g. `bge-m3`, `multilingual-e5`, or a hosted embeddings API).
-- **Voice search** via platform speech APIs (Android SpeechRecognizer, iOS Speech, Tizen/webOS voice where available) feeding the same pipeline.
+- **Voice search** via the browser Web Speech API where available, feeding the same pipeline.
 - **Guardrails:** retrieval only over legal catalog + the user's own sources; the LLM never invents streams or URLs.
 
 ### 7.2 Recommendations
@@ -300,7 +300,7 @@ erDiagram
 
 - **Testing:** unit (Vitest/Jest, JUnit/XCTest), contract tests from OpenAPI, ingestion fixtures (malformed M3U corpus), player E2E on real devices/emulators, load tests (k6) for EPG grid endpoints.
 - **Observability:** structured logs, traces, client QoE metrics, SLOs (API availability 99.9%, EPG freshness < 6 h, search p95 < 400 ms).
-- **CI/CD:** GitHub Actions, per-PR preview of web, store pipelines via fastlane (iOS/Android), Tizen/webOS packaging jobs.
+- **CI/CD:** GitHub Actions: typecheck/tests for every package, web build, and an end-to-end Docker Compose smoke test (setup script, migrations, auth, real catalog sync).
 - **Accessibility:** screen-reader labels, focus visibility, caption support, high-contrast theme.
 - **Localization:** ICU message format, RTL snapshot tests.
 
@@ -308,10 +308,9 @@ erDiagram
 
 ```
 apps/
-  web/            # React PWA (also packaged for Tizen & webOS)
-  tizen/  webos/  # thin packaging shells
-  android/        # Kotlin, Compose (phone + TV)
-  ios/            # Swift, SwiftUI (iPhone, iPad, tvOS)
+  web/            # React PWA: the product
+  android/        # optional skeleton (not on the release path)
+  ios/            # optional skeleton (not on the release path)
 services/
   api/            # NestJS modular monolith
   workers/        # ingestion, EPG, health checks
