@@ -28,6 +28,10 @@ export interface UserChannel {
   epgChannelId?: string;
   /** Directory (Premium) entry this channel of the user's own subscription is linked to. */
   premiumId?: string;
+  /** Catalog facts (ISO country, ISO 639-3 languages, iptv-org categories) used to group channels. */
+  country?: string;
+  languages?: string[];
+  categories?: string[];
   sortOrder: number;
   hidden: boolean;
 }
@@ -68,7 +72,8 @@ const toSource = (r: Row): UserSource => ({
 const toChannel = (r: Row): UserChannel => ({
   id: r.id as string, userId: r.user_id as string, sourceId: opt(r.source_id as string | null), name: r.name as string,
   logoUrl: opt(r.logo_url as string | null), group: opt(r.group_name as string | null), streamUrl: r.stream_url as string,
-  epgChannelId: opt(r.epg_channel_id as string | null), premiumId: opt(r.premium_id as string | null), sortOrder: r.sort_order as number, hidden: r.hidden as boolean,
+  epgChannelId: opt(r.epg_channel_id as string | null), premiumId: opt(r.premium_id as string | null),
+  country: opt(r.country as string | null), languages: (r.languages as string[] | null) ?? [], categories: (r.categories as string[] | null) ?? [], sortOrder: r.sort_order as number, hidden: r.hidden as boolean,
 });
 
 const CHANNEL_COLS: Record<string, string> = {
@@ -131,8 +136,8 @@ export class Store {
   async addChannel(c: Omit<UserChannel, "id">) {
     const id = randomUUID();
     await this.db.query(
-      "INSERT INTO user_channels (id,user_id,source_id,name,logo_url,group_name,stream_url,epg_channel_id,sort_order,hidden) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-      [id, c.userId, c.sourceId ?? null, c.name, c.logoUrl ?? null, c.group ?? null, c.streamUrl, c.epgChannelId ?? null, c.sortOrder, c.hidden],
+      "INSERT INTO user_channels (id,user_id,source_id,name,logo_url,group_name,stream_url,epg_channel_id,sort_order,hidden,country,languages,categories) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+      [id, c.userId, c.sourceId ?? null, c.name, c.logoUrl ?? null, c.group ?? null, c.streamUrl, c.epgChannelId ?? null, c.sortOrder, c.hidden, c.country ?? null, JSON.stringify(c.languages ?? []), JSON.stringify(c.categories ?? [])],
     );
     return (await this.getChannel(c.userId, id))!;
   }
@@ -357,7 +362,7 @@ export class Store {
     const [lim, uid, base] = [vals.length - 2, vals.length - 1, vals.length];
     const r = (await this.db.query<{ total: string; added: string }>(
       `WITH cand AS (
-         SELECT c.id, c.name, c.logo_url, c.categories->>0 AS category, best.url
+         SELECT c.id, c.name, c.logo_url, c.categories->>0 AS category, c.country, c.languages, c.categories, best.url
            FROM (SELECT * FROM catalog_channels WHERE ${sql} ORDER BY name, id LIMIT $${lim}) c
            JOIN LATERAL (SELECT url FROM catalog_streams s WHERE s.channel_id=c.id AND s.status<>'dead'
                          ORDER BY (s.status='ok') DESC, (s.url LIKE 'https:%') DESC, s.latency_ms NULLS LAST, s.id LIMIT 1) best ON true
@@ -367,8 +372,8 @@ export class Store {
        ), numbered AS (
          SELECT *, row_number() OVER (ORDER BY name, id) AS rn FROM fresh WHERE dup=1
        ), ins AS (
-         INSERT INTO user_channels (id,user_id,name,logo_url,group_name,stream_url,sort_order,hidden)
-         SELECT gen_random_uuid()::text, $${uid}, name, logo_url, category, url, $${base}::int + rn::int - 1, false FROM numbered
+         INSERT INTO user_channels (id,user_id,name,logo_url,group_name,stream_url,sort_order,hidden,country,languages,categories)
+         SELECT gen_random_uuid()::text, $${uid}, name, logo_url, category, url, $${base}::int + rn::int - 1, false, country, languages, categories FROM numbered
          RETURNING 1
        )
        SELECT (SELECT count(*) FROM cand) AS total, (SELECT count(*) FROM ins) AS added`, vals,
