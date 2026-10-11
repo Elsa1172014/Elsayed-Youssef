@@ -351,6 +351,22 @@ export class Store {
     return this.attachStreams(rows);
   }
 
+  /** Matching catalog channels with their best live stream each (for M3U download); capped so the file stays small. */
+  async exportCatalog(opts: CatalogFilter, limit = 10000): Promise<{ name: string; url: string; logoUrl?: string; group?: string; country?: string }[]> {
+    const { sql, vals } = this.catalogWhere(opts);
+    vals.push(Math.min(Math.max(limit, 1), 10000));
+    const rows = (await this.db.query(`SELECT * FROM catalog_channels WHERE ${sql} ORDER BY name, id LIMIT $${vals.length}`, vals)).rows;
+    const out: { name: string; url: string; logoUrl?: string; group?: string; country?: string }[] = [];
+    for (let i = 0; i < rows.length; i += 1000) {
+      for (const c of await this.attachStreams(rows.slice(i, i + 1000))) {
+        const live = c.streams.filter((s) => s.status !== "dead");
+        const best = live.find((s) => s.status === "ok" && s.url.startsWith("https:")) ?? live.find((s) => s.url.startsWith("https:")) ?? live[0];
+        if (best) out.push({ name: c.name, url: best.url, logoUrl: c.logoUrl, group: c.categories[0] ?? c.country, country: c.country });
+      }
+    }
+    return out;
+  }
+
   async countCatalog(opts: CatalogFilter): Promise<number> {
     const { sql, vals } = this.catalogWhere(opts);
     return Number((await this.db.query<{ n: string }>(`SELECT count(*) AS n FROM catalog_channels WHERE ${sql}`, vals)).rows[0]?.n ?? 0);

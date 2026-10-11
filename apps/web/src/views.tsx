@@ -99,7 +99,12 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
         <button disabled={total === 0} onClick={() => {
           if (!window.confirm(`${s.addAll}: ${Math.min(total, 20000)}?`)) return;
           void run(async () => { const r = await api.importCatalog(f); setResult(`${r.added} ${s.added}, ${r.skipped} ${s.skipped}`); await refresh(); });
-        }}>{s.addAll}</button>{" "}<span className="hint">{result}</span>
+        }}>{s.addAll}</button>{" "}
+        <button disabled={total === 0} onClick={() => void run(async () => {
+          const url = URL.createObjectURL(new Blob([await api.exportCatalogM3U(f)], { type: "audio/x-mpegurl" }));
+          const a = document.createElement("a");
+          a.href = url; a.download = `${[f.arabic && "arabic", f.europe && "europe", f.country, f.category, f.language].filter(Boolean).join("-") || "free-channels"}.m3u`; a.click(); URL.revokeObjectURL(url);
+        })}>{s.downloadM3U}</button>{" "}<span className="hint">{result}</span>
       </p>
       <ul>
         {items.map((c) => (

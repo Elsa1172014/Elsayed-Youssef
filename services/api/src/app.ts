@@ -432,6 +432,13 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     return store.searchCatalog({ ...f, limit: Number(q.limit) || undefined, offset: Number(q.offset) || undefined });
   });
 
+  /** Downloadable M3U of the free catalog for the current filter (e.g. Arabic + Sports); open iptv-org data only. */
+  app.get("/v1/catalog/export.m3u", async (req, reply) => {
+    const rows = await store.exportCatalog(filterOf(req.query as Record<string, string | undefined>));
+    const entries = rows.map((r) => ({ duration: -1, name: r.name, url: r.url, tvgLogo: r.logoUrl, groupTitle: r.group, attrs: (r.country ? { "tvg-country": r.country } : {}) as Record<string, string> }));
+    return reply.header("content-type", "audio/x-mpegurl; charset=utf-8").header("x-total-count", rows.length).send(serializeM3U(entries));
+  });
+
   app.get("/v1/catalog/facets", async () => store.catalogFacets());
 
   /** In-app catalog refresh for hosts without a worker (e.g. Vercel Hobby, where the cron has no manual "Run"). */

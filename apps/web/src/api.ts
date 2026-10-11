@@ -148,6 +148,12 @@ export const api = {
   },
   importM3U: (content: string, name?: string) => call<{ imported: number }>("/v1/me/playlists/import", json("POST", { content, name, ownershipAttested: true })),
   importEpg: (content: string) => call<{ programmes: number }>("/v1/me/epg/import", json("POST", { content })),
+  exportCatalogM3U: async (f: CatalogFilter) => {
+    const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v) as [string, string][]);
+    const res = await fetch(`${base}/v1/catalog/export.m3u?${qs}`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    return res.text();
+  },
   exportM3U: async () => {
     const res = await fetch(`${base}/v1/me/playlists/export.m3u`, { headers: { authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`Export failed (${res.status})`);
