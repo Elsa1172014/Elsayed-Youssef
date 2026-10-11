@@ -158,7 +158,7 @@ export function App() {
                   </button>
                 ))}
                 {sources.filter((src) => src.type !== "xmltv").map((src) => (
-                  <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => setGroup(`src:${src.id}`)}>
+                  <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => setGroup(`src:${src.id}`)} title={sourceCounts.get(src.id) ? undefined : s.emptySource}>
                     ▤ {src.name} <small>{sourceCounts.get(src.id) ?? 0}</small>
                   </button>
                 ))}

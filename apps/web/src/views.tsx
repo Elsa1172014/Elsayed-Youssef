@@ -5,6 +5,9 @@ import type { Lang, Strings } from "./i18n";
 
 type Run = (fn: () => Promise<unknown>) => Promise<void>;
 
+/** Name of the Live group created by "add all", from the active filters (e.g. "iptv-org · Arabic · sports"). */
+const groupName = (f: CatalogFilter) => ["iptv-org", f.arabic && "Arabic", f.europe && "Europe", f.country, f.category, f.language, f.q && `“${f.q}”`].filter(Boolean).join(" · ");
+
 export function GuideView({ channels }: { channels: Channel[] }) {
   const [grid, setGrid] = useState<Grid>({});
   const [from] = useState(() => new Date(Math.floor(Date.now() / 1800_000) * 1800_000));
@@ -98,7 +101,7 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
         <strong>{total.toLocaleString()}</strong> {s.channelsFound}{" "}
         <button disabled={total === 0} onClick={() => {
           if (!window.confirm(`${s.addAll}: ${Math.min(total, 20000)}?`)) return;
-          void run(async () => { const r = await api.importCatalog(f); setResult(`${r.added} ${s.added}, ${r.skipped} ${s.skipped}`); await refresh(); });
+          void run(async () => { const r = await api.importCatalog(f, groupName(f)); setResult(`${r.added} ${s.added}, ${r.skipped} ${s.skipped}`); await refresh(); });
         }}>{s.addAll}</button>{" "}
         <button disabled={total === 0} onClick={() => void run(async () => {
           const url = URL.createObjectURL(new Blob([await api.exportCatalogM3U(f)], { type: "audio/x-mpegurl" }));
@@ -172,6 +175,7 @@ export function ManageView({
           <li key={src.id}>
             <span className="grow">{src.name} <small>({src.type}{src.lastSyncAt ? `, ${new Date(src.lastSyncAt).toLocaleString()}` : ""})</small></span>
             {src.type !== "m3u_file" && src.type !== "tuner" && <button onClick={() => act(() => api.syncSource(src.id))}>{s.sync}</button>}
+            <button onClick={() => { const n = window.prompt(s.renameSource, src.name)?.trim(); if (n && n !== src.name) void act(() => api.editSource(src.id, { name: n })); }}>{s.rename}</button>
             <button onClick={() => act(() => api.editSource(src.id, { enabled: !src.enabled }))}>{src.enabled ? s.hide : s.show}</button>
             <button onClick={() => act(() => api.deleteSource(src.id))}>{s.delete}</button>
           </li>

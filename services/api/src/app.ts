@@ -476,8 +476,17 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     const b = body(req);
     const f = filterOf(Object.fromEntries(["q", "country", "category", "language", "arabic", "europe"].map((k) => [k, typeof b[k] === "string" ? (b[k] as string) : undefined])));
     const limit = Number.isInteger(b.limit) && (b.limit as number) > 0 ? Math.min(b.limit as number, 20_000) : 1_000;
-    const result = await store.importCatalog(uidOf(req), { ...f, limit });
-    return reply.code(201).send(result);
+    const uid = uidOf(req);
+    // Channels added from the catalog land in a named group (e.g. "iptv-org · Arabic · sports") so they show up as their own chip in Live.
+    const name = str(b.name, 120);
+    let sourceId: string | undefined;
+    if (name) {
+      const existing = (await store.listSources(uid)).find((x) => x.type === "m3u_file" && !x.url && x.name === name);
+      sourceId = (existing ?? (await store.addSource({ userId: uid, type: "m3u_file", name, enabled: true, ownershipAttestedAt: now().toISOString() }))).id;
+    }
+    const result = await store.importCatalog(uid, { ...f, limit, sourceId });
+    if (sourceId && result.added === 0 && !(await store.countChannelsOfSource(uid, sourceId))) await store.deleteSource(uid, sourceId);
+    return reply.code(201).send({ ...result, sourceId });
   });
 
   app.post("/v1/catalog/:id/add", async (req, reply) => {

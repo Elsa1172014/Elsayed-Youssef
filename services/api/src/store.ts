@@ -139,6 +139,9 @@ export class Store {
       : (await this.db.query("SELECT * FROM user_channels WHERE user_id=$1 ORDER BY sort_order, name", [userId])).rows;
     return rows.map(toChannel);
   }
+  async countChannelsOfSource(userId: string, sourceId: string) {
+    return Number((await this.db.query<{ n: string }>("SELECT count(*) AS n FROM user_channels WHERE user_id=$1 AND source_id=$2", [userId, sourceId])).rows[0]?.n ?? 0);
+  }
   async countChannels(userId: string) {
     return Number((await this.db.query<{ n: string }>("SELECT count(*) AS n FROM user_channels WHERE user_id=$1", [userId])).rows[0]?.n ?? 0);
   }
@@ -402,10 +405,10 @@ export class Store {
    * (a row-by-row loop took minutes for ~9.5k channels and hit the serverless time limit). Streams the user
    * already has are skipped. Returns how many rows matched and how many were inserted.
    */
-  async importCatalog(userId: string, opts: CatalogFilter & { limit: number }): Promise<{ added: number; skipped: number }> {
+  async importCatalog(userId: string, opts: CatalogFilter & { limit: number; sourceId?: string }): Promise<{ added: number; skipped: number }> {
     const { sql, vals } = this.catalogWhere(opts);
-    vals.push(opts.limit, userId, await this.nextSortOrder(userId));
-    const [lim, uid, base] = [vals.length - 2, vals.length - 1, vals.length];
+    vals.push(opts.limit, userId, await this.nextSortOrder(userId), opts.sourceId ?? null);
+    const [lim, uid, base, srcId] = [vals.length - 3, vals.length - 2, vals.length - 1, vals.length];
     const r = (await this.db.query<{ total: string; added: string }>(
       `WITH cand AS (
          SELECT c.id, c.name, c.logo_url, c.categories->>0 AS category, c.country, c.languages, c.categories, best.url
@@ -418,8 +421,8 @@ export class Store {
        ), numbered AS (
          SELECT *, row_number() OVER (ORDER BY name, id) AS rn FROM fresh WHERE dup=1
        ), ins AS (
-         INSERT INTO user_channels (id,user_id,name,logo_url,group_name,stream_url,sort_order,hidden,country,languages,categories)
-         SELECT gen_random_uuid()::text, $${uid}, name, logo_url, category, url, $${base}::int + rn::int - 1, false, country, languages, categories FROM numbered
+         INSERT INTO user_channels (id,user_id,source_id,name,logo_url,group_name,stream_url,sort_order,hidden,country,languages,categories)
+         SELECT gen_random_uuid()::text, $${uid}, $${srcId}::text, name, logo_url, category, url, $${base}::int + rn::int - 1, false, country, languages, categories FROM numbered
          RETURNING 1
        )
        SELECT (SELECT count(*) FROM cand) AS total, (SELECT count(*) FROM ins) AS added`, vals,

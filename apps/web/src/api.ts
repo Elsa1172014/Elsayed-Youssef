@@ -198,7 +198,7 @@ export const api = {
   aiSummary: (channelId: string, lang: string) => call<{ summary: string; ai: boolean }>(`/v1/ai/channels/${channelId}/summary`, json("POST", { lang })),
   aiTranslate: (text: string, to: string) => call<{ text: string }>("/v1/ai/translate", json("POST", { text, to })),
   similar: (channelId: string) => call<{ id: string; score: number }[]>(`/v1/me/channels/${channelId}/similar`),
-  importCatalog: (f: CatalogFilter, limit = 20000) => call<{ added: number; skipped: number }>("/v1/catalog/import", json("POST", { ...f, limit })),
+  importCatalog: (f: CatalogFilter, name?: string, limit = 20000) => call<{ added: number; skipped: number }>("/v1/catalog/import", json("POST", { ...f, name, limit })),
   addFromCatalog: (id: string) => call<Channel>(`/v1/catalog/${encodeURIComponent(id)}/add`, json("POST")),
   clearHistory: () => call<void>("/v1/me/watch-events", json("DELETE")),
 };
