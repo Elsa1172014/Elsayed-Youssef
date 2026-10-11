@@ -8,7 +8,7 @@ import { createSafeFetch } from "../../../services/api/src/safeFetch";
 import { Store } from "../../../services/api/src/store";
 
 // Serverless: no persistent containers, so keep one small pool per warm instance and build the app once.
-process.env.MIGRATIONS_DIR ??= fileURLToPath(new URL("../migrations", import.meta.url));
+process.env.MIGRATIONS_DIR ??= fileURLToPath(new URL("./migrations", import.meta.url));
 process.env.PG_POOL_MAX ??= "2";
 process.env.NODE_ENV ??= "production";
 
