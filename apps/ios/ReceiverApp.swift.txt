@@ -1,0 +1,36 @@
+// Drop into a new Xcode iOS/tvOS App target (add the local ReceiverKit package), rename to ReceiverApp.swift.
+import AVKit
+import ReceiverKit
+import SwiftUI
+
+@main
+struct ReceiverApp: App {
+    // Dev-only token; replace with the real sign-in flow once the auth provider is chosen.
+    let api = ReceiverAPI(base: URL(string: "http://localhost:3000")!, token: "dev:ios")
+    var body: some Scene { WindowGroup { ChannelList(api: api) } }
+}
+
+struct ChannelList: View {
+    let api: ReceiverAPI
+    @State private var channels: [Channel] = []
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        NavigationStack {
+            VStack {
+                if let player { VideoPlayer(player: player).frame(height: 240) }
+                List(channels) { c in
+                    Button(c.name) { Task { await play(c) } }
+                }
+            }
+            .navigationTitle("Smart Receiver")
+            .task { channels = (try? await api.channels()) ?? [] }
+        }
+    }
+
+    private func play(_ c: Channel) async {
+        guard let url = try? await api.streamURL(channelID: c.id) else { return }
+        player = AVPlayer(url: url)
+        player?.play()
+    }
+}

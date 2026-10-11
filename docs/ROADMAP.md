@@ -23,11 +23,13 @@ Work ships as small reviewed pull requests with tests.
 
 ---
 
-> **Progress (live):**
-> - Done: M3U parser/serializer, XMLTV parser, SSRF guard, CI, PR template.
-> - Done (dev-grade, in-memory store): user sources/channels CRUD with ownership attestation, M3U import/export, XMLTV import with now/next, Arabic-aware search, content-based recommendations, EPG auto-mapping suggestions, watch-history deletion (`services/api`).
-> - Done: web app (`apps/web`) with HLS player, channel manager, search, now/next, RTL toggle.
-> - Not started: Postgres store, real auth, credential encryption, iptv-org/official catalog sync, stream health checker, Xtream, Android/iOS/Tizen/webOS apps, embeddings-based search.
+> **Progress (live)** — authentication is deliberately deferred (owner decision); everything below runs on a development-only auth placeholder.
+> - **Done, tested:** M3U/XMLTV/Xtream parsing, SSRF-safe fetching, encrypted source credentials, Postgres schema + store (tested on PGlite, a real Postgres engine), user sources/channels CRUD with ownership attestation and additive re-sync (user edits are never overwritten), M3U import/export, multi-source EPG merge by priority, now/next + time-window grid, free catalog (iptv-org mapper, curated-official loader, takedown flag), stream health probing and ranking, hybrid lexical + embedding search, recommendations, EPG auto-mapping suggestions, history deletion.
+> - **Done, builds:** web app (live, guide, catalog, manage; AR/EN with RTL).
+> - **Packaged, unverified on devices:** Tizen and webOS staging (`apps/package-tv.sh`).
+> - **Source skeletons, not compiled here:** Android/Android TV (Compose + Media3), iOS/tvOS (SwiftUI + AVPlayer).
+> - **Blocked on the owner:** auth provider choice; hosting; store/developer accounts and signing certificates; a verified official/FAST channel list (`catalog/official.json` is empty by design); network access to iptv-org from the build environment (the sync job is covered by fixtures only).
+> - **Not started:** real-model embeddings (pluggable interface exists; default is a hashing embedder), pgvector at catalog scale, FTA tuner integration (HDHomeRun/TVHeadend), cross-device sync/change log, parental controls, casting, TV-native player adapters (AVPlay), admin console.
 > - See [DEPLOYMENT.md](./DEPLOYMENT.md) for release blockers.
 
 ---
