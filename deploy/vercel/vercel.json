@@ -1,0 +1,27 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm ci --prefix ../../apps/web && npm ci --prefix ../../services/api",
+  "buildCommand": "npm run build --prefix ../../apps/web -- --outDir ../../deploy/vercel/public --emptyOutDir && mkdir -p migrations && cp ../../services/api/migrations/*.sql migrations/",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.ts": { "maxDuration": 30, "includeFiles": "migrations/**" },
+    "api/cron.ts": { "maxDuration": 60, "includeFiles": "migrations/**" }
+  },
+  "crons": [{ "path": "/api/cron", "schedule": "0 3 * * *" }],
+  "rewrites": [
+    { "source": "/v1/:path*", "destination": "/api/index" },
+    { "source": "/healthz", "destination": "/api/index" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * blob:; connect-src *; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }
+      ]
+    }
+  ]
+}

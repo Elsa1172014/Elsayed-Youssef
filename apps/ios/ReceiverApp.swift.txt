@@ -1,0 +1,60 @@
+// Drop into a new Xcode iOS/tvOS App target (add the local ReceiverKit package), rename to ReceiverApp.swift.
+import AVKit
+import ReceiverKit
+import SwiftUI
+
+@main
+struct ReceiverApp: App {
+    var body: some Scene { WindowGroup { Root() } }
+}
+
+struct Root: View {
+    @State private var api: ReceiverAPI?
+    @State private var username = ""
+    @State private var password = ""
+    @State private var error = ""
+    private let base = URL(string: "http://localhost:3000")! // production must be HTTPS
+
+    var body: some View {
+        if let api {
+            ChannelList(api: api)
+        } else {
+            Form {
+                TextField("Username", text: $username).textInputAutocapitalization(.never)
+                SecureField("Password", text: $password)
+                if !error.isEmpty { Text(error).foregroundStyle(.red) }
+                Button("Sign in") {
+                    Task {
+                        do { api = try await ReceiverAPI(base: base).signedIn(username: username, password: password) }
+                        catch { self.error = "Sign-in failed" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ChannelList: View {
+    let api: ReceiverAPI
+    @State private var channels: [Channel] = []
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        NavigationStack {
+            VStack {
+                if let player { VideoPlayer(player: player).frame(height: 240) }
+                List(channels) { c in
+                    Button(c.name) { Task { await play(c) } }
+                }
+            }
+            .navigationTitle("Smart Receiver")
+            .task { channels = (try? await api.channels()) ?? [] }
+        }
+    }
+
+    private func play(_ c: Channel) async {
+        guard let url = try? await api.streamURL(channelID: c.id) else { return }
+        player = AVPlayer(url: url)
+        player?.play()
+    }
+}

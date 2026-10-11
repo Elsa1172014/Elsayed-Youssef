@@ -1,0 +1,25 @@
+# SITE_ADDRESS=":80"            -> plain HTTP (local network / behind a tunnel)
+# SITE_ADDRESS="tv.example.com" -> automatic HTTPS (ports 80 and 443 must reach this machine)
+{$SITE_ADDRESS} {
+	encode gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		# Streams and logos come from many third-party hosts, so media/img/connect are open; scripts are same-origin only.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * blob:; connect-src *; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+	}
+
+	handle /healthz {
+		reverse_proxy api:3000
+	}
+	handle /v1/* {
+		reverse_proxy api:3000
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

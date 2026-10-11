@@ -1,0 +1,72 @@
+# One-command deployment:  ./scripts/setup.sh        (see docs/DEPLOYMENT.md)
+x-api: &api
+  build:
+    context: .
+    dockerfile: services/api/Dockerfile
+  restart: unless-stopped
+  environment:
+    NODE_ENV: production
+    DATABASE_URL: ${DATABASE_URL:-postgres://receiver:${POSTGRES_PASSWORD:?run ./scripts/setup.sh to create .env}@db:5432/receiver}
+    SECRET_KEY: ${SECRET_KEY:?run ./scripts/setup.sh to create .env}
+    TRUST_PROXY: "true" # the api is only reachable through Caddy, which sets X-Forwarded-For
+    IPTV_ORG_API: ${IPTV_ORG_API:-https://iptv-org.github.io/api}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-} # optional: enables AI summaries/translation
+    AI_MODEL: ${AI_MODEL:-}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: receiver
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./scripts/setup.sh to create .env}
+      POSTGRES_DB: receiver
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U receiver -d receiver"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    <<: *api
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # Keeps the free-channel catalog (iptv-org) fresh and probes stream health in the background.
+  worker:
+    <<: *api
+    command: ["npx", "tsx", "src/jobs/worker.ts"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

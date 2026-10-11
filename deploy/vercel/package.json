@@ -1,0 +1,6 @@
+{
+  "name": "receiver-vercel",
+  "private": true,
+  "type": "module",
+  "description": "Vercel entry point: static web app + serverless API + cron sync. See docs/DEPLOYMENT.md (النشر على Vercel)."
+}
