@@ -24,6 +24,8 @@ export function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [nowNext, setNowNext] = useState<NowNext>({});
   const [selected, setSelected] = useState<Channel | null>(null);
+  const [playNonce, setPlayNonce] = useState(0); // bumps to restart the player when the AI repair found a better source
+  const playChannel = useCallback((c: Channel) => { setSelected(c); setPlayNonce((n) => n + 1); }, []);
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<string>("all"); // a GroupId, or "src:<sourceId>" for one of the user's own sources
   const [sources, setSources] = useState<Source[]>([]);
@@ -178,7 +180,7 @@ export function App() {
                       <strong>{c.name}</strong>
                       <small>{nowNext[c.id]?.now ? (nowNext[c.id]!.now as { title: string }).title : c.group ?? ""}</small>
                     </button>
-                    <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={(x) => setSelected(x)} />
+                    <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={(x) => setSelected(x)} onPlayed={playChannel} onNavigate={setTab} />
                   </div>
                 </li>
               ))}
@@ -188,7 +190,7 @@ export function App() {
           <section className="main">
             {selected ? (
               <>
-                <Player relayLabel={s.viaRelay} relayTip={s.viaRelayTip} channelId={selected.id} onWatched={(sec) => void api.watch(selected.id, sec).catch(() => undefined)} />
+                <Player key={`${selected.id}:${playNonce}`} relayLabel={s.viaRelay} relayTip={s.viaRelayTip} playLabel={s.playBtn} fixedLabel={s.aiFixed} channelId={selected.id} onWatched={(sec) => void api.watch(selected.id, sec).catch(() => undefined)} />
                 <h2>{selected.name}</h2>
                 <p>{s.now}: {nowNext[selected.id]?.now?.title ?? "—"} · {s.next}: {nowNext[selected.id]?.next?.title ?? "—"}</p>
               </>
@@ -199,7 +201,7 @@ export function App() {
       <div className="page">
         {tab === "guide" && <GuideView channels={channels.filter((c) => !c.hidden)} />}
         {tab === "catalog" && <CatalogView s={s} run={run} refresh={refresh} />}
-        {tab === "premium" && <PremiumView s={s} lang={lang} channels={channels} refresh={refresh} run={run} onPlay={(c) => { setSelected(c); setTab("live"); }} />}
+        {tab === "premium" && <PremiumView s={s} lang={lang} channels={channels} refresh={refresh} run={run} onPlay={(c) => { playChannel(c); setTab("live"); }} />}
         {tab === "manage" && <ManageView s={s} channels={channels} suggestions={suggestions} refresh={refresh} run={run} onAccountDeleted={signOut} />}
       </div>
     </div>

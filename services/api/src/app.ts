@@ -2,14 +2,15 @@ import { syncIptvOrg } from "./jobs/catalog";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   assertPublicHttpUrl, fillCredentials, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
-  looksLikeHlsManifest, matchOwnChannels, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
+  identityName, looksLikeHlsManifest, matchOwnChannels, sameChannel, type ChannelIdentity, type Diagnosis, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
   xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
-import { clip, LANGS, plainSummary, SUMMARY_SYSTEM, TRANSLATE_SYSTEM, type Lang, type TextModel } from "./ai";
+import { clip, EXPLAIN_SYSTEM, LANGS, plainSummary, SUMMARY_SYSTEM, TRANSLATE_SYSTEM, type Lang, type TextModel } from "./ai";
 import { AuthError, bearerToken, type AuthService, type Authenticator } from "./auth";
 import { AttemptLimiter } from "./rateLimit";
 import type { SecretBox } from "./crypto";
 import { createSafeOpen, type SafeFetch, type SafeOpen } from "./safeFetch";
+import { diagnoseStream } from "./diagnose";
 import { randomProxyKey, relay, signProxyUrl, verifyProxyQuery } from "./hlsProxy";
 import type { SourceType, Store, UserChannel, UserSource } from "./store";
 
@@ -357,6 +358,120 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     if (!c) return bad(reply, "Not found", 404);
     const url = await resolveStream(uid, c);
     return { url, proxy: signProxyUrl(proxyKey, url, now().getTime()) };
+  });
+
+  // ---- AI Repair & Play: real diagnosis + authorized-source search. Never bypasses logins, geo-blocks or DRM. ----
+  const diagnoseLimiter = new AttemptLimiter(240, 3600_000, () => now().getTime()); // per user per hour: bounds outbound probing
+  const probeGate = (uid: string, reply: FastifyReply) => {
+    diagnoseLimiter.fail(uid);
+    const wait = diagnoseLimiter.blockedFor(uid);
+    if (wait) { reply.header("retry-after", wait).code(429).send({ error: "Too many diagnostics, try again later" }); return false; }
+    return true;
+  };
+  const signUrl = (u: string) => signProxyUrl(proxyKey, u, now().getTime());
+  const identityOf = (c: UserChannel): ChannelIdentity => ({ officialId: c.epgChannelId, name: c.name, country: c.country, languages: c.languages });
+
+  /** For Xtream channels: is the user's own login/subscription still accepted by the provider's official API? */
+  const accountProblemOf = async (uid: string, ch: UserChannel): Promise<Diagnosis["accountProblem"]> => {
+    const src = ch.sourceId ? await store.getSource(uid, ch.sourceId) : undefined;
+    if (!src || src.type !== "xtream") return undefined;
+    const creds = await credsOf(uid, src);
+    if (!creds) return "login_rejected";
+    try {
+      const info = JSON.parse(await (await fetcher(xtreamApiUrl(creds), { signal: AbortSignal.timeout(8000) })).text()) as unknown;
+      if (xtreamAuthOk(info)) return undefined;
+      return (info as { user_info?: { auth?: unknown } })?.user_info?.auth === 0 ? "login_rejected" : "subscription_inactive";
+    } catch {
+      return undefined; // provider API unreachable: not evidence of a login problem
+    }
+  };
+
+  /** A fresh link for the same channel from the user's OWN source (their playlist URL or Xtream account): the provider's official renewal path. */
+  const renewedFromSource = async (uid: string, ch: UserChannel, current: string): Promise<{ name: string; url: string } | undefined> => {
+    const src = ch.sourceId ? await store.getSource(uid, ch.sourceId) : undefined;
+    if (!src || !src.enabled) return undefined;
+    try {
+      if (src.type === "m3u_url" && src.url) {
+        const res = await fetcher(src.url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return undefined;
+        const txt = await res.text();
+        if (looksLikeHlsManifest(txt)) return undefined; // the source IS the stream: nothing to renew from
+        const hit = parseM3U(txt).entries.find((e) => e.url !== current && sameChannel(identityOf(ch), { officialId: e.tvgId, name: e.name }));
+        return hit && { name: hit.name, url: hit.url };
+      }
+      if (src.type === "xtream") {
+        const creds = await credsOf(uid, src);
+        if (!creds) return undefined;
+        const get = async (action: string) => JSON.parse(await (await fetcher(xtreamApiUrl(creds, action), { signal: AbortSignal.timeout(10_000) })).text()) as unknown;
+        const live = parseXtreamLive([], await get("get_live_streams"));
+        const hit = live.find((x) => sameChannel(identityOf(ch), { officialId: x.epgChannelId, name: x.name }));
+        const url = hit && fillCredentials(xtreamStreamTemplate(creds.baseUrl, hit.streamId), creds);
+        return hit && url && url !== current ? { name: hit.name, url } : undefined;
+      }
+    } catch {
+      /* provider unreachable: no renewal available right now */
+    }
+    return undefined;
+  };
+
+  app.post("/v1/me/channels/:id/diagnose", async (req, reply) => {
+    const uid = uidOf(req);
+    if (!probeGate(uid, reply)) return;
+    const ch = await store.getChannel(uid, (req.params as { id: string }).id);
+    if (!ch) return bad(reply, "Not found", 404);
+    const url = await resolveStream(uid, ch);
+    const d = await diagnoseStream(opener, url, signUrl);
+    const accountProblem = !d.ok && (d.cause === "auth_required" || d.cause === "forbidden") ? await accountProblemOf(uid, ch) : undefined;
+    return { ...d, accountProblem, cause: accountProblem ? "auth_required" : d.cause };
+  });
+
+  /** Finds other AUTHORIZED streams of the SAME channel (strict id/name/country/language match), tests each, and returns only those that passed. */
+  app.post("/v1/me/channels/:id/find-source", async (req, reply) => {
+    const uid = uidOf(req);
+    if (!probeGate(uid, reply)) return;
+    const ch = await store.getChannel(uid, (req.params as { id: string }).id);
+    if (!ch) return bad(reply, "Not found", 404);
+    const current = await resolveStream(uid, ch);
+    const found: { name: string; url: string; origin: "renewed" | "catalog" | "registered" }[] = [];
+    const seen = new Set([current, ch.streamUrl]);
+    const add = (name: string, url: string, origin: (typeof found)[number]["origin"]) => {
+      if (!seen.has(url) && found.length < 8 && /^https?:\/\//i.test(url)) { seen.add(url); found.push({ name, url, origin }); }
+    };
+    const renewed = await renewedFromSource(uid, ch, current);
+    if (renewed) add(renewed.name, renewed.url, "renewed");
+    const me = identityOf(ch);
+    for (const c of (await store.listChannels(uid)).filter((x) => x.id !== ch.id && sameChannel(me, identityOf(x))).slice(0, 5)) add(c.name, await resolveStream(uid, c), "registered");
+    const key = identityName(ch.name);
+    if (key.length >= 3) {
+      for (const e of await store.searchCatalog({ q: key, country: ch.country, limit: 40 })) {
+        if (!sameChannel(me, { officialId: e.id, name: e.name, country: e.country, languages: e.languages })) continue;
+        for (const st of rankStreams(e.streams.filter((x) => x.status !== "dead")).slice(0, 3)) add(e.name, st.url, "catalog");
+      }
+    }
+    // Probe in parallel under one overall budget so a slow origin cannot stall the request.
+    const tested: Awaited<ReturnType<typeof diagnoseStream>>[] = new Array(found.length);
+    const probes = found.map((f, i) => diagnoseStream(opener, f.url, signUrl).then((d) => { tested[i] = d; }, () => undefined));
+    await Promise.race([Promise.allSettled(probes), new Promise((r) => setTimeout(r, 12_000))]);
+    const candidates = found.flatMap((f, i) => (tested[i]?.ok && tested[i]!.protection.drm.length === 0 ? [{ ...f, proxy: tested[i]!.proxy, diagnosis: tested[i]! }] : []));
+    return { tried: found.length, candidates };
+  });
+
+  /** Plain-language explanation of a finished diagnosis (model optional; the app has built-in texts otherwise). */
+  app.post("/v1/me/channels/:id/explain", async (req, reply) => {
+    const uid = uidOf(req);
+    const ch = await store.getChannel(uid, (req.params as { id: string }).id);
+    if (!ch) return bad(reply, "Not found", 404);
+    if (!model) return { text: null };
+    if (!aiGate(uid, reply)) return;
+    const b = body(req);
+    const lang = langOf(b.lang);
+    const facts = ["cause", "outcome", "needs", "kind"].map((k) => `${k}: ${clip(str(b[k], 40) ?? "-", 40)}`).join("\n")
+      + "\n" + (Array.isArray(b.log) ? b.log.slice(0, 12).map((l) => `- ${clip(String(l), 160)}`).join("\n") : "");
+    try {
+      return { text: await model.complete(EXPLAIN_SYSTEM(lang), `Channel: ${clip(ch.name, 100)}\n${facts}`, 160) };
+    } catch {
+      return { text: null };
+    }
   });
 
   /** Signed HLS relay (see hlsProxy.ts). Authorised by the signature, not the session, so players can fetch segments directly. */

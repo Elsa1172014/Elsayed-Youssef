@@ -1,3 +1,4 @@
+import type { Candidate, Diagnosis } from "./core";
 export interface Channel {
   id: string;
   sourceId?: string;
@@ -146,6 +147,17 @@ export const api = {
     const r = await call<{ url: string; proxy: string }>(`/v1/me/channels/${id}/stream`);
     return { url: r.url, proxy: base + r.proxy };
   },
+  /** Server-side inspection of the channel's real stream (HTTP, type, manifest, DRM, first media bytes). */
+  diagnose: async (id: string) => {
+    const d = await call<Diagnosis>(`/v1/me/channels/${id}/diagnose`, json("POST"));
+    return { ...d, proxy: d.proxy && base + d.proxy };
+  },
+  /** Authorized alternates of the SAME channel that already passed a server probe. */
+  findSource: async (id: string) => {
+    const r = await call<{ tried: number; candidates: Candidate[] }>(`/v1/me/channels/${id}/find-source`, json("POST"));
+    return { tried: r.tried, candidates: r.candidates.map((c) => ({ ...c, proxy: base + c.proxy, diagnosis: { ...c.diagnosis, proxy: base + c.diagnosis.proxy } })) };
+  },
+  explain: (id: string, body: { lang: string; cause?: string; outcome?: string; needs?: string; kind?: string; log?: string[] }) => call<{ text: string | null }>(`/v1/me/channels/${id}/explain`, json("POST", body)),
   importM3U: (content: string, name?: string) => call<{ imported: number }>("/v1/me/playlists/import", json("POST", { content, name, ownershipAttested: true })),
   importEpg: (content: string) => call<{ programmes: number }>("/v1/me/epg/import", json("POST", { content })),
   exportCatalogM3U: async (f: CatalogFilter) => {

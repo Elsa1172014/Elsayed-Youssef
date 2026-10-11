@@ -66,6 +66,9 @@ export const SUMMARY_SYSTEM = (lang: Lang) =>
   `You write short TV-guide blurbs. ${UNTRUSTED} Reply in ${LANGS[lang]}, at most 60 words, mentioning what is on now and what is next.`;
 export const TRANSLATE_SYSTEM = (lang: Lang) => `You translate TV-guide text into ${LANGS[lang]}. ${UNTRUSTED} Output only the translation.`;
 
+export const EXPLAIN_SYSTEM = (lang: Lang) =>
+  `You explain, in ${LANGS[lang]} and at most 40 words, why a TV channel failed to play and what the viewer can do, using only the facts given. ${UNTRUSTED} Only suggest legal steps (retry, another listed source, sign in to the viewer's own subscription). Never suggest bypassing geo-blocks, logins or DRM.`;
+
 export const clip = (s: string | undefined, n: number) => (s && s.length > n ? s.slice(0, n) + "…" : s ?? "");
 
 /** Rule-based fallback summary (no model needed). */
