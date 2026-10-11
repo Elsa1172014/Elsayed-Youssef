@@ -127,7 +127,11 @@ export const api = {
   addChannel: (c: { name: string; streamUrl: string; group?: string }) => call<Channel>("/v1/me/channels", json("POST", c)),
   editChannel: (id: string, patch: Partial<Channel>) => call<Channel>(`/v1/me/channels/${id}`, json("PATCH", patch)),
   deleteChannel: (id: string) => call<void>(`/v1/me/channels/${id}`, json("DELETE")),
-  streamUrl: async (id: string) => (await call<{ url: string }>(`/v1/me/channels/${id}/stream`)).url,
+  /** `url` is the stream's own address; `proxy` is a signed same-origin relay for streams browsers cannot reach directly. */
+  stream: async (id: string) => {
+    const r = await call<{ url: string; proxy: string }>(`/v1/me/channels/${id}/stream`);
+    return { url: r.url, proxy: base + r.proxy };
+  },
   importM3U: (content: string) => call<{ imported: number }>("/v1/me/playlists/import", json("POST", { content, ownershipAttested: true })),
   importEpg: (content: string) => call<{ programmes: number }>("/v1/me/epg/import", json("POST", { content })),
   exportM3U: async () => {

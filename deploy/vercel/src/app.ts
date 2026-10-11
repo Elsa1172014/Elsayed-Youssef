@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { modelFromEnv } from "../../../services/api/src/ai";
 import { AuthService, tokenAuthenticator } from "../../../services/api/src/auth";
 import { buildApp } from "../../../services/api/src/app";
-import { secretBoxFromEnv } from "../../../services/api/src/crypto";
+import { proxyKeyFromEnv, secretBoxFromEnv } from "../../../services/api/src/crypto";
 import { openDb } from "../../../services/api/src/openDb";
 import { createSafeFetch } from "../../../services/api/src/safeFetch";
 import { Store } from "../../../services/api/src/store";
@@ -52,6 +52,7 @@ export function getRuntime(): Promise<Runtime> {
       authenticate: tokenAuthenticator(auth),
       secrets,
       fetcher: createSafeFetch(),
+      proxyKey: proxyKeyFromEnv(),
       allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
       trustProxy: true, // Vercel's edge sets X-Forwarded-For
       model: modelFromEnv(),

@@ -1,0 +1,121 @@
+import { describe, expect, it } from "vitest";
+import { rewriteManifest } from "../src/hlsProxy";
+import type { SafeOpen } from "../src/safeFetch";
+import { alice, makeApp } from "./helpers";
+
+const enc = (s: string) => new TextEncoder().encode(s);
+const body = (s: string | Uint8Array) => new Response(s).body;
+
+function fakeOpen(routes: Record<string, { status?: number; type?: string; body?: string; throws?: string }>): SafeOpen & { calls: string[] } {
+  const calls: string[] = [];
+  const f = (async (url: string) => {
+    calls.push(url);
+    const r = routes[url];
+    if (!r) return { status: 404, headers: new Headers(), body: null, url };
+    if (r.throws) throw Object.assign(new Error(r.throws), { name: r.throws });
+    return { status: r.status ?? 200, headers: new Headers({ "content-type": r.type ?? "application/octet-stream" }), body: body(r.body ?? ""), url };
+  }) as SafeOpen & { calls: string[] };
+  f.calls = calls;
+  return f;
+}
+
+const MASTER = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nlow/index.m3u8\n";
+const MEDIA = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:4,\nseg1.ts\n#EXTINF:4,\nhttp://cdn.example/seg2.ts\n';
+const routes = {
+  "http://old.example/live/master.m3u8": { type: "application/vnd.apple.mpegurl", body: MASTER },
+  "http://old.example/live/low/index.m3u8": { type: "application/x-mpegURL", body: MEDIA },
+  "http://old.example/live/low/seg1.ts": { type: "video/mp2t", body: "SEGMENT-ONE" },
+  "http://old.example/live/low/key.bin": { body: "KEY" },
+  "http://dead.example/x.m3u8": { status: 403 },
+  "http://gone.example/x.m3u8": { status: 404 },
+  "http://slow.example/x.m3u8": { throws: "AbortError" },
+  "http://down.example/x.m3u8": { throws: "fetch failed" },
+  "http://html.example/x.m3u8": { type: "text/html", body: "<html>nope</html>" },
+};
+
+async function proxyUrlFor(app: Awaited<ReturnType<typeof makeApp>>["app"], url: string) {
+  const ch = (await app.inject({ method: "POST", url: "/v1/me/channels", headers: alice, payload: { name: "T", streamUrl: url } })).json();
+  const r = (await app.inject({ url: `/v1/me/channels/${ch.id}/stream`, headers: alice })).json();
+  return r as { url: string; proxy: string };
+}
+
+describe("HLS relay", () => {
+  it("rewrites manifests and relays segments and keys, without needing a session", async () => {
+    const opener = fakeOpen(routes);
+    const { app } = await makeApp({}, { opener });
+    const s = await proxyUrlFor(app, "http://old.example/live/master.m3u8");
+    expect(s.url).toBe("http://old.example/live/master.m3u8");
+    const master = await app.inject({ url: s.proxy }); // no Authorization header: browsers' players follow plain URLs
+    expect(master.statusCode).toBe(200);
+    expect(master.headers["content-type"]).toContain("mpegurl");
+    expect(master.body).not.toContain("old.example");
+    const variant = master.body.split("\n").find((l) => l.startsWith("/v1/proxy"))!;
+    const media = (await app.inject({ url: variant })).body;
+    const lines = media.split("\n");
+    const keyLine = lines.find((l) => l.startsWith("#EXT-X-KEY"))!;
+    expect(keyLine).toMatch(/URI="\/v1\/proxy\?u=/);
+    const segs = lines.filter((l) => l.startsWith("/v1/proxy"));
+    expect(segs).toHaveLength(2);
+    const seg = await app.inject({ url: segs[0]! });
+    expect(seg.statusCode).toBe(200);
+    expect(seg.headers["content-type"]).toBe("video/mp2t");
+    expect(seg.body).toBe("SEGMENT-ONE");
+    await app.inject({ url: segs[1]! });
+    expect(opener.calls).toContain("http://cdn.example/seg2.ts");
+    const key = keyLine.match(/URI="([^"]+)"/)![1]!;
+    expect((await app.inject({ url: key })).body).toBe("KEY");
+  });
+
+  it("is not an open proxy: tampered, unsigned and expired links are refused", async () => {
+    const opener = fakeOpen(routes);
+    const { app, clock } = await makeApp({}, { opener });
+    const s = await proxyUrlFor(app, "http://old.example/live/master.m3u8");
+    const u = new URL(s.proxy, "http://x");
+    const other = Buffer.from("http://old.example/live/low/key.bin").toString("base64url");
+    expect((await app.inject({ url: `/v1/proxy?u=${other}&e=${u.searchParams.get("e")}&s=${u.searchParams.get("s")}` })).statusCode).toBe(403);
+    expect((await app.inject({ url: "/v1/proxy?u=" + other })).statusCode).toBe(403);
+    expect((await app.inject({ url: "/v1/proxy" })).statusCode).toBe(403);
+    clock.now = new Date(clock.now.getTime() + 7 * 3600_000);
+    expect((await app.inject({ url: s.proxy })).statusCode).toBe(403);
+    expect(opener.calls).toHaveLength(0);
+  });
+
+  it("explains dead, missing, slow, offline and non-HLS streams", async () => {
+    const opener = fakeOpen(routes);
+    const { app } = await makeApp({}, { opener });
+    const msg = async (url: string) => {
+      const r = await app.inject({ url: (await proxyUrlFor(app, url)).proxy });
+      return [r.statusCode, r.json().error as string] as const;
+    };
+    expect(await msg("http://dead.example/x.m3u8")).toEqual([502, expect.stringContaining("refused")]);
+    expect(await msg("http://gone.example/x.m3u8")).toEqual([502, expect.stringContaining("no longer available")]);
+    expect(await msg("http://slow.example/x.m3u8")).toEqual([504, expect.stringContaining("in time")]);
+    expect(await msg("http://down.example/x.m3u8")).toEqual([502, expect.stringContaining("offline")]);
+    expect(await msg("http://html.example/x.m3u8")).toEqual([502, expect.stringContaining("not return a valid playlist")]);
+  });
+
+  it("rewriteManifest resolves relative, root-relative and absolute references", () => {
+    const out = rewriteManifest("#EXTM3U\na.ts\n/b.ts\nhttps://c.example/c.ts\nftp://x/y\n", "http://h.example/p/m.m3u8", (u) => `S(${u})`);
+    expect(out).toBe("#EXTM3U\nS(http://h.example/p/a.ts)\nS(http://h.example/b.ts)\nS(https://c.example/c.ts)\nftp://x/y\n");
+  });
+});
+
+describe("bulk add", () => {
+  it("adds ~10k catalog channels in one request, fast, and skips duplicates on the second run", async () => {
+    const { app, db } = await makeApp();
+    await db.query(`INSERT INTO catalog_channels (id,name,country,provenance) SELECT 'c'||g, 'Channel '||lpad(g::text,5,'0'), 'EG', 'fta' FROM generate_series(1,10000) g`);
+    await db.query(`INSERT INTO catalog_streams (channel_id,url,status) SELECT 'c'||g, 'http://s.example/'||g||'.m3u8', 'unknown' FROM generate_series(1,10000) g`);
+    await db.query(`INSERT INTO catalog_streams (channel_id,url,status) SELECT 'c'||g, 'https://s.example/'||g||'.m3u8', 'unknown' FROM generate_series(1,10000,2) g`);
+    const t = Date.now();
+    const r = await app.inject({ method: "POST", url: "/v1/catalog/import", headers: alice, payload: { limit: 20000 } });
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toEqual({ added: 10000, skipped: 0 });
+    expect(Date.now() - t).toBeLessThan(15_000);
+    const mine = (await app.inject({ url: "/v1/me/channels", headers: alice })).json();
+    expect(mine).toHaveLength(10000);
+    expect(mine[0].name).toBe("Channel 00001");
+    expect(mine[0].streamUrl).toBe("https://s.example/1.m3u8"); // HTTPS preferred
+    expect(mine[1].streamUrl).toBe("http://s.example/2.m3u8");
+    expect((await app.inject({ method: "POST", url: "/v1/catalog/import", headers: alice, payload: { limit: 20000 } })).json()).toEqual({ added: 0, skipped: 10000 });
+  });
+});

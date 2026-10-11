@@ -1,7 +1,7 @@
 import { buildApp } from "./app";
 import { modelFromEnv } from "./ai";
 import { AuthService, tokenAuthenticator } from "./auth";
-import { secretBoxFromEnv } from "./crypto";
+import { proxyKeyFromEnv, secretBoxFromEnv } from "./crypto";
 import { openDb } from "./openDb";
 import { createSafeFetch } from "./safeFetch";
 import { Store } from "./store";
@@ -14,6 +14,7 @@ const app = buildApp({
   authenticate: tokenAuthenticator(auth),
   secrets: secretBoxFromEnv(),
   fetcher: createSafeFetch(),
+  proxyKey: proxyKeyFromEnv(),
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   trustProxy: process.env.TRUST_PROXY === "true",
   model: modelFromEnv(),

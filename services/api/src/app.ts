@@ -9,7 +9,8 @@ import { clip, LANGS, plainSummary, SUMMARY_SYSTEM, TRANSLATE_SYSTEM, type Lang,
 import { AuthError, bearerToken, type AuthService, type Authenticator } from "./auth";
 import { AttemptLimiter } from "./rateLimit";
 import type { SecretBox } from "./crypto";
-import type { SafeFetch } from "./safeFetch";
+import { createSafeOpen, type SafeFetch, type SafeOpen } from "./safeFetch";
+import { randomProxyKey, relay, signProxyUrl, verifyProxyQuery } from "./hlsProxy";
 import type { SourceType, Store, UserChannel, UserSource } from "./store";
 
 const SOURCE_TYPES: SourceType[] = ["m3u_url", "m3u_file", "xtream", "xmltv", "tuner"];
@@ -27,6 +28,10 @@ interface Deps {
   model?: TextModel;
   secrets: SecretBox;
   fetcher: SafeFetch;
+  /** Streaming, SSRF-guarded fetcher used by the HLS relay (`/v1/proxy`). */
+  opener?: SafeOpen;
+  /** HMAC key for relay URLs; must be identical across instances (derived from SECRET_KEY). */
+  proxyKey?: Buffer;
   /** Base URL of the iptv-org API used by the in-app "Sync now" button (tests point it at a fake). */
   catalogApi?: string;
   now?: () => Date;
@@ -42,7 +47,7 @@ interface Creds {
   password: string;
 }
 
-export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedOrigins = [], trustProxy = false, model, catalogApi, now = () => new Date() }: Deps): FastifyInstance {
+export function buildApp({ store, auth, authenticate, secrets, fetcher, opener = createSafeOpen(), proxyKey = randomProxyKey(), allowedOrigins = [], trustProxy = false, model, catalogApi, now = () => new Date() }: Deps): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES, trustProxy });
   // Browsers/clients often send `content-type: application/json` on body-less POST/DELETE; Fastify's default parser
   // answers that with 400 "Bad Request". Treat an empty body as {} and keep the default parser (with its
@@ -68,7 +73,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedO
 
   app.get("/healthz", async () => ({ ok: true }));
 
-  const PUBLIC = new Set(["/healthz", "/v1/auth/register", "/v1/auth/login"]);
+  const PUBLIC = new Set(["/healthz", "/v1/proxy", "/v1/auth/register", "/v1/auth/login"]);
   app.addHook("preHandler", async (req, reply) => {
     if (PUBLIC.has(req.url.split("?")[0]!)) return;
     const uid = await authenticate(req);
@@ -321,7 +326,18 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedO
   app.get("/v1/me/channels/:id/stream", async (req, reply) => {
     const uid = uidOf(req);
     const c = await store.getChannel(uid, (req.params as { id: string }).id);
-    return c ? { url: await resolveStream(uid, c) } : bad(reply, "Not found", 404);
+    if (!c) return bad(reply, "Not found", 404);
+    const url = await resolveStream(uid, c);
+    return { url, proxy: signProxyUrl(proxyKey, url, now().getTime()) };
+  });
+
+  /** Signed HLS relay (see hlsProxy.ts). Authorised by the signature, not the session, so players can fetch segments directly. */
+  app.get("/v1/proxy", async (req, reply) => {
+    const url = verifyProxyQuery(proxyKey, req.query as Record<string, unknown>, now().getTime());
+    if (!url) return bad(reply, "Invalid or expired link", 403);
+    const range = typeof req.headers.range === "string" ? req.headers.range : undefined;
+    const r = await relay(opener, url, (u) => signProxyUrl(proxyKey, u, now().getTime()), range);
+    return reply.code(r.status).headers(r.headers).send(r.body);
   });
 
   // ---- Playlist import / export ----
@@ -437,18 +453,8 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedO
     const b = body(req);
     const f = filterOf(Object.fromEntries(["q", "country", "category", "language"].map((k) => [k, typeof b[k] === "string" ? (b[k] as string) : undefined])));
     const limit = Number.isInteger(b.limit) && (b.limit as number) > 0 ? Math.min(b.limit as number, 20_000) : 1_000;
-    const uid = uidOf(req);
-    const have = new Set((await store.listChannels(uid)).map((c) => c.streamUrl));
-    let order = await store.nextSortOrder(uid);
-    let added = 0;
-    let skipped = 0;
-    for (const c of await store.catalogForImport({ ...f, limit })) {
-      if (have.has(c.streamUrl)) { skipped++; continue; }
-      have.add(c.streamUrl);
-      await store.addChannel({ userId: uid, name: c.name, streamUrl: c.streamUrl, logoUrl: c.logoUrl, group: c.category, sortOrder: order++, hidden: false });
-      added++;
-    }
-    return reply.code(201).send({ added, skipped });
+    const result = await store.importCatalog(uidOf(req), { ...f, limit });
+    return reply.code(201).send(result);
   });
 
   app.post("/v1/catalog/:id/add", async (req, reply) => {
