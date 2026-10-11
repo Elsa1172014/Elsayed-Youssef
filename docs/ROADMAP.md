@@ -23,7 +23,12 @@ Work ships as small reviewed pull requests with tests.
 
 ---
 
-> **Progress (live):** Phase 0 partly done (M3U parser, CI, PR template). Phase 1 backend started: user sources/channels CRUD, M3U import/export, XMLTV import + now/next on an in-memory store (`services/api`). See [DEPLOYMENT.md](./DEPLOYMENT.md) for release blockers.
+> **Progress (live):**
+> - Done: M3U parser/serializer, XMLTV parser, SSRF guard, CI, PR template.
+> - Done (dev-grade, in-memory store): user sources/channels CRUD with ownership attestation, M3U import/export, XMLTV import with now/next, Arabic-aware search, content-based recommendations, EPG auto-mapping suggestions, watch-history deletion (`services/api`).
+> - Done: web app (`apps/web`) with HLS player, channel manager, search, now/next, RTL toggle.
+> - Not started: Postgres store, real auth, credential encryption, iptv-org/official catalog sync, stream health checker, Xtream, Android/iOS/Tizen/webOS apps, embeddings-based search.
+> - See [DEPLOYMENT.md](./DEPLOYMENT.md) for release blockers.
 
 ---
 
