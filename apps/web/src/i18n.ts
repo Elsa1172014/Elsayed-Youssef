@@ -3,7 +3,7 @@ export type Lang = "en" | "ar";
 const dict = {
   en: {
     live: "Live", guide: "Guide", catalog: "Free channels", manage: "My channels & sources",
-    g_all: "All", g_arabic: "Arabic", g_movies: "Movies", g_entertainment: "Entertainment", g_news: "News", g_sports: "Sports", g_kids: "Kids", g_music: "Music", g_documentary: "Documentary", g_religious: "Religious", g_other: "Other", showMore: "Show more",
+    g_all: "All", g_arabic: "Arabic", g_movies: "Movies", g_entertainment: "Entertainment", g_news: "News", g_sports: "Sports", g_kids: "Kids", g_music: "Music", g_documentary: "Documentary", g_religious: "Religious", g_other: "Other", showMore: "Show more", arabicOnly: "Arabic channels only", viaRelay: "via server", viaRelayTip: "This stream is relayed through your server because the channel does not allow direct playback in a browser.",
     search: "Search channels or what's on", forYou: "For you", now: "Now", next: "Next", pick: "Select a channel to start watching.",
     attest: "I own or am entitled to use the playlists and accounts I add.", add: "Add", sync: "Sync", delete: "Delete", hide: "Hide", show: "Show",
     accept: "Accept", exportM3U: "Export my playlist (M3U)", clearHistory: "Delete my viewing history", addToMine: "Add to my channels",
@@ -21,7 +21,7 @@ const dict = {
   },
   ar: {
     live: "مباشر", guide: "الدليل", catalog: "قنوات مجانية", manage: "قنواتي ومصادري",
-    g_all: "الكل", g_arabic: "عربية", g_movies: "أفلام", g_entertainment: "ترفيه", g_news: "أخبار", g_sports: "رياضة", g_kids: "أطفال", g_music: "موسيقى", g_documentary: "وثائقي", g_religious: "دينية", g_other: "أخرى", showMore: "عرض المزيد",
+    g_all: "الكل", g_arabic: "عربية", g_movies: "أفلام", g_entertainment: "ترفيه", g_news: "أخبار", g_sports: "رياضة", g_kids: "أطفال", g_music: "موسيقى", g_documentary: "وثائقي", g_religious: "دينية", g_other: "أخرى", showMore: "عرض المزيد", arabicOnly: "القنوات العربية فقط", viaRelay: "عبر الخادم", viaRelayTip: "تُبَثّ هذه القناة عبر خادمك لأن مصدرها لا يسمح بالتشغيل المباشر في المتصفح.",
     search: "ابحث عن قناة أو برنامج", forYou: "مقترح لك", now: "الآن", next: "التالي", pick: "اختر قناة لبدء المشاهدة.",
     attest: "أقرّ بأنني أملك أو يحق لي استخدام القوائم والحسابات التي أضيفها.", add: "إضافة", sync: "مزامنة", delete: "حذف", hide: "إخفاء", show: "إظهار",
     accept: "قبول", exportM3U: "تصدير قائمتي (M3U)", clearHistory: "حذف سجل المشاهدة", addToMine: "أضف إلى قنواتي",

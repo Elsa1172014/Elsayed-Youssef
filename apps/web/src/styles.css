@@ -53,4 +53,5 @@ button.ai { border: 0; background: none; cursor: pointer; color: #4c8dff; font-s
 .groups { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .groups button { border: 1px solid #8886; border-radius: 999px; padding: 4px 10px; background: none; color: inherit; cursor: pointer; }
 .groups button[aria-selected="true"] { background: #4c8dff; color: #fff; border-color: #4c8dff; }
+.groups button[aria-pressed="true"], .filters button[aria-pressed="true"] { background: #4c8dff; color: #fff; }
 .more { width: 100%; margin: 8px 0; padding: 8px; }

@@ -17,7 +17,7 @@ async function relayReason(proxyUrl: string): Promise<string> {
  * Plays HLS. Direct from the stream's origin when the browser can (https + CORS), otherwise through the API's
  * signed relay (mixed content / missing CORS). Dead or blocked streams get a clear message.
  */
-export function Player({ channelId, onWatched }: { channelId: string; onWatched: (seconds: number) => void }) {
+export function Player({ channelId, onWatched, relayLabel = "via server", relayTip = "" }: { channelId: string; onWatched: (seconds: number) => void; relayLabel?: string; relayTip?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [theater, setTheater] = useState(false);
@@ -107,7 +107,7 @@ export function Player({ channelId, onWatched }: { channelId: string; onWatched:
         <button type="button" onClick={() => setTheater((t) => !t)} aria-label="Wide view" title="Wide view">▭</button>
         <button type="button" onClick={fullscreen} aria-label="Fullscreen" title="Fullscreen">⛶</button>
       </div>
-      {error ? <p className="error">{error}</p> : via === "relay" && <p className="hint">via relay</p>}
+      {error ? <p className="error">{error}</p> : via === "relay" && <p className="hint" title={relayTip}>ⓘ {relayLabel}</p>}
     </div>
   );
 }

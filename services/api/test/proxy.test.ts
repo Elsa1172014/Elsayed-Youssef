@@ -120,3 +120,16 @@ describe("bulk add", () => {
     expect((await app.inject({ method: "POST", url: "/v1/catalog/import", headers: alice, payload: { limit: 20000 } })).json()).toEqual({ added: 0, skipped: 10000 });
   });
 });
+
+describe("Arabic filter", () => {
+  it("matches Arabic-language or Arab-country channels and imports them in one go", async () => {
+    const { app, db } = await makeApp();
+    await db.query(`INSERT INTO catalog_channels (id,name,country,languages,provenance) VALUES
+      ('a','Nile TV','EG','[]','fta'),('b','Spanish Show','US','["ara"]','fta'),('c','English News','GB','["eng"]','fta'),('d','Kuwait Live','KW','[]','fta')`);
+    await db.query(`INSERT INTO catalog_streams (channel_id,url) SELECT id, 'https://x.example/'||id||'.m3u8' FROM catalog_channels`);
+    const list = (await app.inject({ url: "/v1/catalog?arabic=1", headers: alice })).json();
+    expect(list.map((c: { id: string }) => c.id).sort()).toEqual(["a", "b", "d"]);
+    const r = await app.inject({ method: "POST", url: "/v1/catalog/import", headers: alice, payload: { arabic: "1" } });
+    expect(r.json()).toEqual({ added: 3, skipped: 0 });
+  });
+});
