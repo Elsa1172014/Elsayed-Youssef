@@ -23,6 +23,10 @@ Work ships as small reviewed pull requests with tests.
 
 ---
 
+> **Progress (live):** Phase 0 partly done (M3U parser, CI, PR template). Phase 1 backend started: user sources/channels CRUD, M3U import/export, XMLTV import + now/next on an in-memory store (`services/api`). See [DEPLOYMENT.md](./DEPLOYMENT.md) for release blockers.
+
+---
+
 ## Phase 1 — MVP: Legal Live TV + Own Playlists (≈ 6–8 weeks)
 
 **Goals:** a user can sign in, watch legal live channels on web, and manage their own channels and playlists.
