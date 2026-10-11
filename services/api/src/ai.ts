@@ -24,6 +24,38 @@ export function claudeModel(apiKey: string, opts: { model?: string; fetchImpl?: 
   };
 }
 
+/** Google Gemini via the Generative Language API (GEMINI_API_KEY). The key travels in a header, never in the URL. */
+export function geminiModel(apiKey: string, opts: { model?: string; fetchImpl?: typeof fetch } = {}): TextModel {
+  const model = opts.model ?? "gemini-2.5-flash";
+  const f = opts.fetchImpl ?? fetch;
+  return {
+    async complete(system, user, maxTokens) {
+      const generationConfig: Record<string, unknown> = { maxOutputTokens: maxTokens };
+      // 2.5 Flash "thinks" by default and thinking tokens eat the output budget; short blurbs don't need it.
+      if (model.startsWith("gemini-2.5-flash")) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      const res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": apiKey, "content-type": "application/json" },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) throw new Error(`Model request failed (HTTP ${res.status})`);
+      const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+      const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("").trim();
+      if (!text) throw new Error("Model returned no text");
+      return text;
+    },
+  };
+}
+
+/** Provider priority: GEMINI_API_KEY, then ANTHROPIC_API_KEY, otherwise undefined (rule-based fallbacks). AI_MODEL overrides the model id. */
+export function modelFromEnv(env: Record<string, string | undefined> = process.env): TextModel | undefined {
+  const model = env.AI_MODEL || undefined;
+  if (env.GEMINI_API_KEY) return geminiModel(env.GEMINI_API_KEY, { model });
+  if (env.ANTHROPIC_API_KEY) return claudeModel(env.ANTHROPIC_API_KEY, { model });
+  return undefined;
+}
+
 export const LANGS = { en: "English", ar: "Arabic" } as const;
 export type Lang = keyof typeof LANGS;
 
