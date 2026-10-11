@@ -32,17 +32,50 @@ export function GuideView({ channels }: { channels: Channel[] }) {
   );
 }
 
+/** Refreshes the shared channel directory on demand (hosts without a background worker). Progress survives interruptions. */
+function SyncBar({ s, onDone }: { s: Strings; onDone: () => void }) {
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof api.syncStatus>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const load = () => api.syncStatus().then(setStatus).catch(() => setStatus(null));
+  useEffect(() => { void load(); }, []);
+  const go = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await api.syncNow();
+      setMsg(`${s.syncDone}: ${r.channels.toLocaleString()} / ${r.streams.toLocaleString()} / ${r.premium.toLocaleString()}`);
+    } catch (e) {
+      const m = (e as Error).message;
+      setMsg(/^Request failed \((502|503|504)\)|Failed to fetch/.test(m) ? s.syncRetry : m);
+    }
+    setBusy(false);
+    await load();
+    onDone();
+  };
+  return (
+    <p role="status">
+      {status && status.channels === 0 && !busy && <span className="hint">{s.syncEmpty} </span>}
+      <button disabled={busy || status?.running} onClick={() => void go()}>{s.syncNow}</button>{" "}
+      <span className="hint">
+        {busy ? s.syncing : msg || (status?.lastSync ? `${s.lastSynced}: ${new Date(status.lastSync.at).toLocaleString()}` : "")}
+      </span>
+    </p>
+  );
+}
+
 export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh: () => Promise<unknown> }) {
   const [f, setF] = useState<CatalogFilter>({});
   const [facets, setFacets] = useState<Facets | null>(null);
   const [items, setItems] = useState<CatalogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [result, setResult] = useState("");
-  useEffect(() => { void api.facets().then(setFacets).catch(() => setFacets(null)); }, []);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { void api.facets().then(setFacets).catch(() => setFacets(null)); }, [tick]);
   useEffect(() => {
     const h = setTimeout(() => void api.catalog(f).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => setItems([])), 250);
     return () => clearTimeout(h);
-  }, [f]);
+  }, [f, tick]);
   const sel = (key: keyof CatalogFilter, label: string, list: Facet[] | undefined) => (
     <select aria-label={label} value={f[key] ?? ""} onChange={(e) => setF({ ...f, [key]: e.target.value || undefined })}>
       <option value="">{label}</option>
@@ -52,6 +85,7 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
   return (
     <div>
       <p className="hint">{s.legal}</p>
+      <SyncBar s={s} onDone={() => setTick((t) => t + 1)} />
       <div className="filters">
         <input value={f.q ?? ""} onChange={(e) => setF({ ...f, q: e.target.value || undefined })} placeholder={s.search} />
         {sel("country", s.country, facets?.countries)}
@@ -187,14 +221,15 @@ export function PremiumView({
   const [total, setTotal] = useState(0);
   const [matches, setMatches] = useState<Record<string, { channelId: string; confidence: number }[]>>({});
   const [xtreamIds, setXtreamIds] = useState<Set<string>>(new Set());
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     void api.premiumFacets().then(setFacets).catch(() => setFacets(null));
     void api.sources().then((src) => setXtreamIds(new Set(src.filter((x) => x.type === "xtream").map((x) => x.id)))).catch(() => undefined);
-  }, []);
+  }, [tick]);
   useEffect(() => {
     const h = setTimeout(() => void api.premium(f).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => setItems([])), 250);
     return () => clearTimeout(h);
-  }, [f]);
+  }, [f, tick]);
   const sel = (key: keyof CatalogFilter, label: string, list: Facet[] | undefined) => (
     <select aria-label={label} value={f[key] ?? ""} onChange={(e) => setF({ ...f, [key]: e.target.value || undefined })}>
       <option value="">{label}</option>
@@ -208,6 +243,7 @@ export function PremiumView({
   return (
     <div>
       <p className="hint" role="note">{s.premiumNote}</p>
+      <SyncBar s={s} onDone={() => setTick((t) => t + 1)} />
 
       <h3>{s.mySubscription} ({mine.length})</h3>
       <ul>

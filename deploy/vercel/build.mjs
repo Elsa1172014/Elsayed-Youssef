@@ -28,7 +28,7 @@ for (const name of ["index", "cron"]) {
   });
   mkdirSync(`${dir}/migrations`, { recursive: true });
   for (const f of readdirSync("../../services/api/migrations")) cpSync(`../../services/api/migrations/${f}`, `${dir}/migrations/${f}`);
-  writeFileSync(`${dir}/.vc-config.json`, JSON.stringify({ runtime: "nodejs22.x", handler: "index.mjs", launcherType: "Nodejs", maxDuration: name === "cron" ? 60 : 30 }, null, 2));
+  writeFileSync(`${dir}/.vc-config.json`, JSON.stringify({ runtime: "nodejs22.x", handler: "index.mjs", launcherType: "Nodejs", maxDuration: 60 }, null, 2)); // 60s: the in-app "Sync now" runs inside the API function
   writeFileSync(`${dir}/package.json`, '{"type":"module"}');
 }
 
