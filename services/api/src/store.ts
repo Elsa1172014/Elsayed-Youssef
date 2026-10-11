@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { XmltvProgramme } from "@receiver/core";
+import type { WatchEvent, XmltvChannel, XmltvProgramme } from "@receiver/core";
 
 export type SourceType = "m3u_url" | "m3u_file" | "xtream" | "xmltv" | "tuner";
 
@@ -41,7 +41,11 @@ export interface Store {
   updateChannel(userId: string, id: string, patch: Partial<Omit<UserChannel, "id" | "userId">>): UserChannel | undefined;
   deleteChannel(userId: string, id: string): boolean;
 
-  replaceProgrammes(userId: string, programmes: XmltvProgramme[]): void;
+  replaceProgrammes(userId: string, programmes: XmltvProgramme[], guideChannels?: XmltvChannel[]): void;
+  listGuideChannels(userId: string): XmltvChannel[];
+  addWatchEvent(userId: string, e: WatchEvent): void;
+  listWatchEvents(userId: string): WatchEvent[];
+  clearWatchEvents(userId: string): void;
   listProgrammes(userId: string, epgChannelId: string, fromIso: string, toIso: string): XmltvProgramme[];
 }
 
@@ -49,6 +53,8 @@ export class MemoryStore implements Store {
   private sources = new Map<string, UserSource>();
   private channels = new Map<string, UserChannel>();
   private epg = new Map<string, XmltvProgramme[]>();
+  private guide = new Map<string, XmltvChannel[]>();
+  private watch = new Map<string, WatchEvent[]>();
 
   listSources(userId: string) {
     return [...this.sources.values()].filter((s) => s.userId === userId);
@@ -99,8 +105,21 @@ export class MemoryStore implements Store {
     return this.getChannel(userId, id) ? this.channels.delete(id) : false;
   }
 
-  replaceProgrammes(userId: string, programmes: XmltvProgramme[]) {
+  replaceProgrammes(userId: string, programmes: XmltvProgramme[], guideChannels: XmltvChannel[] = []) {
     this.epg.set(userId, [...programmes].sort((a, b) => a.start.localeCompare(b.start)));
+    this.guide.set(userId, guideChannels);
+  }
+  listGuideChannels(userId: string) {
+    return this.guide.get(userId) ?? [];
+  }
+  addWatchEvent(userId: string, e: WatchEvent) {
+    this.watch.set(userId, [...(this.watch.get(userId) ?? []), e]);
+  }
+  listWatchEvents(userId: string) {
+    return this.watch.get(userId) ?? [];
+  }
+  clearWatchEvents(userId: string) {
+    this.watch.delete(userId);
   }
   listProgrammes(userId: string, epgChannelId: string, fromIso: string, toIso: string) {
     return (this.epg.get(userId) ?? []).filter((p) => p.channelId === epgChannelId && p.stop > fromIso && p.start < toIso);

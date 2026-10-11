@@ -72,3 +72,32 @@ describe("playlist import/export + EPG", () => {
     expect(nn[channels[0].id].next.title).toBe("Next Show");
   });
 });
+
+describe("discovery", () => {
+  it("searches, recommends from watch history, suggests EPG mappings, and clears history", async () => {
+    await app.inject({ method: "POST", url: "/v1/me/playlists/import", headers: alice, payload: {
+      ownershipAttested: true,
+      content: `#EXTM3U\n#EXTINF:-1 group-title="News",Al Jazeera\nhttps://example.org/1\n#EXTINF:-1 group-title="News",Sky News Arabia\nhttps://example.org/2\n#EXTINF:-1 group-title="Kids",Cartoons\nhttps://example.org/3\n`,
+    } });
+    const ch = (await app.inject({ url: "/v1/me/channels", headers: alice })).json() as { id: string; name: string }[];
+    const aj = ch.find((c) => c.name === "Al Jazeera")!;
+    const sky = ch.find((c) => c.name.startsWith("Sky"))!;
+
+    const found = (await app.inject({ url: "/v1/search?q=jazeera", headers: alice })).json();
+    expect(found[0].id).toBe(aj.id);
+    expect((await app.inject({ url: "/v1/search", headers: alice })).statusCode).toBe(400);
+
+    expect((await app.inject({ method: "POST", url: "/v1/me/watch-events", headers: alice, payload: { channelId: "nope", seconds: 60 } })).statusCode).toBe(404);
+    await app.inject({ method: "POST", url: "/v1/me/watch-events", headers: alice, payload: { channelId: aj.id, seconds: 1800 } });
+    const recs = (await app.inject({ url: "/v1/recommendations", headers: alice })).json();
+    expect(recs[0].id).toBe(sky.id);
+    expect((await app.inject({ url: "/v1/recommendations", headers: bob })).json()).toEqual([]);
+
+    await app.inject({ method: "POST", url: "/v1/me/epg/import", headers: alice, payload: { content: `<tv><channel id="aj.qa"><display-name>Al Jazeera</display-name></channel></tv>` } });
+    const sugg = (await app.inject({ url: "/v1/me/epg/suggestions", headers: alice })).json();
+    expect(sugg).toEqual([expect.objectContaining({ channelId: aj.id, epgChannelId: "aj.qa" })]);
+
+    expect((await app.inject({ method: "DELETE", url: "/v1/me/watch-events", headers: alice })).statusCode).toBe(204);
+    expect((await app.inject({ url: "/v1/recommendations", headers: alice })).json()).toEqual([]);
+  });
+});

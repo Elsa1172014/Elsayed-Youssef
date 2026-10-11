@@ -1,5 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { assertPublicHttpUrl, parseM3U, parseXmltv, serializeM3U, type M3UEntry } from "@receiver/core";
+import {
+  assertPublicHttpUrl, parseM3U, parseXmltv, recommend, searchChannels, serializeM3U, suggestEpgMappings, type M3UEntry,
+} from "@receiver/core";
 import type { Authenticator } from "./auth";
 import type { SourceType, Store, UserChannel } from "./store";
 
@@ -180,7 +182,7 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
     const b = (req.body ?? {}) as Record<string, unknown>;
     if (typeof b.content !== "string" || !b.content) return bad(reply, "content (XMLTV text) is required");
     const r = parseXmltv(b.content);
-    store.replaceProgrammes(uidOf(req), r.programmes);
+    store.replaceProgrammes(uidOf(req), r.programmes, r.channels);
     return reply.code(201).send({ channels: r.channels.length, programmes: r.programmes.length, warnings: r.warnings.length });
   });
 
@@ -195,6 +197,51 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
       result[c.id] = { now: list.find((p) => p.start <= t && p.stop > t), next: list.find((p) => p.start > t) };
     }
     return reply.send(result);
+  });
+
+  // ---- AI-assisted discovery (runs only over the caller's own channels) ----
+  const nowPlayingFor = (uid: string) => {
+    const t = now().toISOString();
+    const map: Record<string, { title: string; category?: string }> = {};
+    for (const c of store.listChannels(uid)) {
+      if (!c.epgChannelId) continue;
+      const p = store.listProgrammes(uid, c.epgChannelId, t, t).find((x) => x.start <= t && x.stop > t);
+      if (p) map[c.id] = { title: p.title, category: p.category };
+    }
+    return map;
+  };
+
+  app.get("/v1/search", async (req, reply) => {
+    const q = str((req.query as Record<string, unknown>).q, 200);
+    if (!q) return bad(reply, "q is required");
+    const uid = uidOf(req);
+    return searchChannels(q, store.listChannels(uid), nowPlayingFor(uid));
+  });
+
+  app.post("/v1/me/watch-events", async (req, reply) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const uid = uidOf(req);
+    if (typeof b.channelId !== "string" || !store.getChannel(uid, b.channelId)) return bad(reply, "unknown channel", 404);
+    if (typeof b.seconds !== "number" || !(b.seconds > 0) || b.seconds > 86_400) return bad(reply, "invalid seconds");
+    store.addWatchEvent(uid, { channelId: b.channelId, seconds: b.seconds });
+    return reply.code(204).send();
+  });
+
+  // Viewing history is the user's to delete.
+  app.delete("/v1/me/watch-events", async (req, reply) => {
+    store.clearWatchEvents(uidOf(req));
+    return reply.code(204).send();
+  });
+
+  app.get("/v1/recommendations", async (req) => {
+    const uid = uidOf(req);
+    return recommend(store.listChannels(uid), store.listWatchEvents(uid));
+  });
+
+  // Suggestions only; the client applies one via PATCH /v1/me/channels/:id after the user approves.
+  app.get("/v1/me/epg/suggestions", async (req) => {
+    const uid = uidOf(req);
+    return suggestEpgMappings(store.listChannels(uid), store.listGuideChannels(uid));
   });
 
   return app;
