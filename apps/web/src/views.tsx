@@ -124,6 +124,8 @@ export function ManageView({
   const [form, setForm] = useState({ name: "", type: "m3u_url" as Source["type"], url: "", username: "", password: "" });
   const [chName, setChName] = useState("");
   const [chUrl, setChUrl] = useState("");
+  const [note, setNote] = useState("");
+  const [filter, setFilter] = useState("");
   const load = () => api.sources().then(setSources).catch(() => setSources([]));
   useEffect(() => { void load(); }, []);
   const act = (fn: () => Promise<unknown>) => run(async () => { await fn(); await Promise.all([refresh(), load()]); });
@@ -135,7 +137,20 @@ export function ManageView({
       <label className="attest"><input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} /> {s.attest}</label>
 
       <h3>Sources</h3>
-      <form onSubmit={(e) => { e.preventDefault(); void act(() => api.addSource(form)); }}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        void act(async () => {
+          // Adding a source only saves it; fetch its channels right away so they appear without a second click.
+          const src = await api.addSource(form);
+          setNote("");
+          try {
+            const r = await api.syncSource(src.id);
+            setNote(r.added !== undefined ? `${r.added} ${s.added}` : "");
+          } catch (err) {
+            setNote((err as Error).message); // source stays saved; "Sync" retries it
+          }
+        });
+      }}>
         <input placeholder={s.name} value={form.name} onChange={set("name")} required />
         <select value={form.type} onChange={set("type")} aria-label={s.type}>
           <option value="m3u_url">M3U URL</option><option value="xtream">Xtream</option><option value="xmltv">XMLTV guide</option>
@@ -145,7 +160,7 @@ export function ManageView({
           <input placeholder={s.username} value={form.username} onChange={set("username")} required autoComplete="off" />
           <input placeholder={s.password} type="password" value={form.password} onChange={set("password")} required autoComplete="off" />
         </>)}
-        <button disabled={!attested}>{s.add}</button>
+        <button disabled={!attested}>{s.add}</button>{" "}<span className="hint">{attested ? note : s.attest}</span>
       </form>
       <ul>
         {sources.map((src) => (
@@ -188,8 +203,10 @@ export function ManageView({
         <input placeholder="https://…m3u8" value={chUrl} onChange={(e) => setChUrl(e.target.value)} required />
         <button>{s.add}</button>
       </form>
+      <input placeholder={s.search} aria-label={s.search} value={filter} autoComplete="off" onChange={(e) => setFilter(e.target.value)} />
+      <p className="hint">{channels.length.toLocaleString()}</p>
       <ul>
-        {channels.map((c) => (
+        {channels.filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase())).slice(0, 200).map((c) => (
           <li key={c.id}>
             <input className="grow" defaultValue={c.name} onBlur={(e) => e.target.value && e.target.value !== c.name && void act(() => api.editChannel(c.id, { name: e.target.value }))} />
             <button onClick={() => act(() => api.editChannel(c.id, { hidden: !c.hidden }))}>{c.hidden ? s.show : s.hide}</button>

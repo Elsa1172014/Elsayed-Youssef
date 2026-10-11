@@ -143,3 +143,37 @@ describe("Europe filter", () => {
     expect(list.map((c: { id: string }) => c.id).sort()).toEqual(["a", "b"]);
   });
 });
+
+describe("persistence", () => {
+  it("keeps channels, sources and settings across sign-out, sign-in and a fresh server instance", async () => {
+    const M3U = "#EXTM3U\n" + Array.from({ length: 1200 }, (_, i) => `#EXTINF:-1 group-title="News",Chan ${i}\nhttps://p.example/${i}.m3u8`).join("\n");
+    const { app, db, auth, secrets, fetcher } = await makeApp({ "https://lists.example/my.m3u": M3U });
+    const { buildApp } = await import("../src/app");
+    const { tokenAuthenticator } = await import("../src/auth");
+    const { Store } = await import("../src/store");
+
+    await app.inject({ method: "POST", url: "/v1/me/channels", headers: alice, payload: { name: "Mine", streamUrl: "https://mine.example/a.m3u8" } });
+    const src = (await app.inject({ method: "POST", url: "/v1/me/sources", headers: alice, payload: { name: "List", type: "m3u_url", url: "https://lists.example/my.m3u", ownershipAttested: true } })).json();
+    const sync = await app.inject({ method: "POST", url: `/v1/me/sources/${src.id}/sync`, headers: alice });
+    expect(sync.json()).toEqual({ added: 1200 });
+
+    expect((await app.inject({ url: "/v1/me/stats", headers: alice })).json()).toMatchObject({ channels: 1201, sources: 1 });
+
+    // sign out (revokes the session only), then sign in again with the same credentials
+    expect((await app.inject({ method: "POST", url: "/v1/auth/logout", headers: alice })).statusCode).toBeLessThan(300);
+    expect((await app.inject({ url: "/v1/me/channels", headers: alice })).statusCode).toBe(401);
+    const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { username: "alice", password: "correct horse battery" } });
+    const again = { authorization: `Bearer ${login.json().token}` };
+
+    // a brand-new server instance on the same database (cold start / redeploy) sees everything
+    const app2 = buildApp({ store: new Store(db), auth, authenticate: tokenAuthenticator(auth), secrets, fetcher });
+    for (const a of [app, app2]) {
+      const all = (await a.inject({ url: "/v1/me/channels", headers: again })).json();
+      expect(all).toHaveLength(1201);
+      const page = await a.inject({ url: "/v1/me/channels?limit=500&offset=1000", headers: again });
+      expect(page.json()).toHaveLength(201);
+      expect(page.headers["x-total-count"]).toBe("1201");
+      expect((await a.inject({ url: "/v1/me/sources", headers: again })).json()).toHaveLength(1);
+    }
+  });
+});

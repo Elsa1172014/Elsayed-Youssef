@@ -128,7 +128,16 @@ export const api = {
   me: () => call<{ id: string; username: string }>("/v1/me"),
   changePassword: (currentPassword: string, newPassword: string) => call<void>("/v1/auth/password", json("POST", { currentPassword, newPassword })),
   deleteAccount: (password: string) => call<void>("/v1/me", json("DELETE", { password })),
-  channels: () => call<Channel[]>("/v1/me/channels"),
+/** Loads every channel in pages of 2000 (a 10k list in one response can exceed serverless size/time limits). */
+  channels: async (onPage?: (soFar: Channel[]) => void) => {
+    const all: Channel[] = [];
+    for (;;) {
+      const page = await call<Channel[]>(`/v1/me/channels?limit=2000&offset=${all.length}`);
+      all.push(...page);
+      onPage?.([...all]);
+      if (page.length < 2000) return all;
+    }
+  },
   addChannel: (c: { name: string; streamUrl: string; group?: string }) => call<Channel>("/v1/me/channels", json("POST", c)),
   editChannel: (id: string, patch: Partial<Channel>) => call<Channel>(`/v1/me/channels/${id}`, json("PATCH", patch)),
   deleteChannel: (id: string) => call<void>(`/v1/me/channels/${id}`, json("DELETE")),
@@ -165,6 +174,7 @@ export const api = {
     return { items: (await res.json()) as CatalogEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
+  stats: () => call<{ channels: number; sources: number; catalog: number }>("/v1/me/stats"),
   syncStatus: () => call<{ running: boolean; channels: number; lastSync: { at: string; channels: number; streams: number; premium: number } | null }>("/v1/catalog/sync"),
   syncNow: () => call<{ channels: number; streams: number; premium: number }>("/v1/catalog/sync", json("POST")),
   premium: async (f: CatalogFilter, offset = 0) => {

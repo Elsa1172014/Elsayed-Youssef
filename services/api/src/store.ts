@@ -133,8 +133,29 @@ export class Store {
   }
 
   // ---- channels ----
-  async listChannels(userId: string) {
-    return (await this.db.query("SELECT * FROM user_channels WHERE user_id=$1 ORDER BY sort_order, name", [userId])).rows.map(toChannel);
+  async listChannels(userId: string, page?: { limit: number; offset: number }) {
+    const rows = page
+      ? (await this.db.query("SELECT * FROM user_channels WHERE user_id=$1 ORDER BY sort_order, name, id LIMIT $2 OFFSET $3", [userId, page.limit, page.offset])).rows
+      : (await this.db.query("SELECT * FROM user_channels WHERE user_id=$1 ORDER BY sort_order, name", [userId])).rows;
+    return rows.map(toChannel);
+  }
+  async countChannels(userId: string) {
+    return Number((await this.db.query<{ n: string }>("SELECT count(*) AS n FROM user_channels WHERE user_id=$1", [userId])).rows[0]?.n ?? 0);
+  }
+  /** Multi-row insert (500 per statement): thousands of channels per request instead of one round trip each. */
+  async addChannels(rows: Omit<UserChannel, "id">[]) {
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const vals: unknown[] = [];
+      const tuples = chunk.map((c) => {
+        vals.push(randomUUID(), c.userId, c.sourceId ?? null, c.name, c.logoUrl ?? null, c.group ?? null, c.streamUrl, c.epgChannelId ?? null, c.sortOrder, c.hidden, c.country ?? null, JSON.stringify(c.languages ?? []), JSON.stringify(c.categories ?? []));
+        return `(${Array.from({ length: 13 }, (_, k) => `$${vals.length - 12 + k}`).join(",")})`;
+      });
+      await this.db.query(
+        `INSERT INTO user_channels (id,user_id,source_id,name,logo_url,group_name,stream_url,epg_channel_id,sort_order,hidden,country,languages,categories) VALUES ${tuples.join(",")}`, vals,
+      );
+    }
+    return rows.length;
   }
   async getChannel(userId: string, id: string) {
     const r = (await this.db.query("SELECT * FROM user_channels WHERE user_id=$1 AND id=$2", [userId, id])).rows[0];
