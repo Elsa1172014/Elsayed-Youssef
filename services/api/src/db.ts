@@ -11,8 +11,17 @@ export interface Db {
 // MIGRATIONS_DIR lets serverless bundles (Vercel) point at a copy of the SQL files shipped with the function.
 const migrationsDir = () => process.env.MIGRATIONS_DIR ?? join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
-/** Applies migrations/*.sql in filename order, once each. */
+/** Applies migrations/*.sql in filename order, once each. Retries once so two cold starts racing on a fresh database both succeed. */
 export async function migrate(db: Db): Promise<string[]> {
+  try {
+    return await migrateOnce(db);
+  } catch {
+    await new Promise((r) => setTimeout(r, 500));
+    return migrateOnce(db);
+  }
+}
+
+async function migrateOnce(db: Db): Promise<string[]> {
   await db.query("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
   const done = new Set((await db.query<{ name: string }>("SELECT name FROM schema_migrations")).rows.map((r) => r.name));
   const applied: string[] = [];
