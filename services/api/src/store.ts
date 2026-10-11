@@ -53,7 +53,11 @@ export interface CatalogFilter {
   country?: string;
   category?: string;
   language?: string;
+  /** "1": Arab-world channels only (Arabic language or an Arab League country). */
+  arabic?: string;
 }
+
+export const ARAB_COUNTRIES = ["SA", "EG", "AE", "QA", "KW", "BH", "OM", "JO", "LB", "SY", "IQ", "YE", "PS", "SD", "LY", "TN", "DZ", "MA", "MR", "SO", "DJ", "KM"];
 
 export interface CatalogEntry extends Omit<CatalogChannel, "streams"> {
   status: "active" | "blocked" | "closed";
@@ -311,6 +315,7 @@ export class Store {
     if (opts.country) { vals.push(opts.country.toUpperCase()); where.push(`country=$${vals.length}`); }
     if (opts.category) { vals.push(JSON.stringify([opts.category.toLowerCase()])); where.push(`categories @> $${vals.length}::jsonb`); }
     if (opts.language) { vals.push(JSON.stringify([opts.language.toLowerCase()])); where.push(`languages @> $${vals.length}::jsonb`); }
+    if (opts.arabic === "1") { vals.push(ARAB_COUNTRIES, JSON.stringify(["ara"])); where.push(`(country = ANY($${vals.length - 1}::text[]) OR languages @> $${vals.length}::jsonb)`); }
     return { sql: where.join(" AND "), vals };
   }
 

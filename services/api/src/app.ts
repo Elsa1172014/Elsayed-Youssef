@@ -407,7 +407,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
   });
 
   // ---- Free catalog (official / FAST / open directory) ----
-  const filterOf = (q: Record<string, string | undefined>) => ({ q: q.q, country: q.country, category: q.category, language: q.language });
+  const filterOf = (q: Record<string, string | undefined>) => ({ q: q.q, country: q.country, category: q.category, language: q.language, arabic: q.arabic });
 
   app.get("/v1/catalog", async (req, reply) => {
     const q = req.query as Record<string, string | undefined>;
@@ -451,7 +451,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
    */
   app.post("/v1/catalog/import", async (req, reply) => {
     const b = body(req);
-    const f = filterOf(Object.fromEntries(["q", "country", "category", "language"].map((k) => [k, typeof b[k] === "string" ? (b[k] as string) : undefined])));
+    const f = filterOf(Object.fromEntries(["q", "country", "category", "language", "arabic"].map((k) => [k, typeof b[k] === "string" ? (b[k] as string) : undefined])));
     const limit = Number.isInteger(b.limit) && (b.limit as number) > 0 ? Math.min(b.limit as number, 20_000) : 1_000;
     const result = await store.importCatalog(uidOf(req), { ...f, limit });
     return reply.code(201).send(result);

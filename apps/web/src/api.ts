@@ -48,6 +48,7 @@ export interface CatalogFilter {
   country?: string;
   category?: string;
   language?: string;
+  arabic?: string;
 }
 export interface PremiumEntry {
   id: string;

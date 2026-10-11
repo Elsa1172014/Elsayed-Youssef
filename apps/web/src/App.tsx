@@ -140,7 +140,7 @@ export function App() {
           <section className="main">
             {selected ? (
               <>
-                <Player channelId={selected.id} onWatched={(sec) => void api.watch(selected.id, sec).catch(() => undefined)} />
+                <Player relayLabel={s.viaRelay} relayTip={s.viaRelayTip} channelId={selected.id} onWatched={(sec) => void api.watch(selected.id, sec).catch(() => undefined)} />
                 <h2>{selected.name}</h2>
                 <p>{s.now}: {nowNext[selected.id]?.now?.title ?? "—"} · {s.next}: {nowNext[selected.id]?.next?.title ?? "—"}</p>
               </>
