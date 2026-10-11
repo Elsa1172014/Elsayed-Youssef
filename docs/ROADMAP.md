@@ -96,6 +96,10 @@ Work ships as small reviewed pull requests with tests.
 
 ---
 
+## AI Repair & Play (shipped)
+
+Per-channel ✦ button: real stream inspection, bounded automatic repair, strict same-channel alternate search, verified playback. See [AI_REPAIR.md](AI_REPAIR.md).
+
 ## Phase 5 — Scale, Polish & Ecosystem (ongoing)
 
 **Goals:** reliability, growth and extensibility.

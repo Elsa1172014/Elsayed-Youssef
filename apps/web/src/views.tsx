@@ -285,7 +285,7 @@ export function PremiumView({
             <span className="rowwrap">
               <button className="link" onClick={() => onPlay(c)}>{c.name}</button>
               {c.premiumId && <small> ✓ {c.premiumId}</small>}
-              <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={onPlay} />
+              <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={onPlay} onPlayed={onPlay} />
             </span>
             {c.premiumId && <button onClick={() => act(() => api.premiumUnlink(c.id))}>{s.unlink}</button>}
           </li>
