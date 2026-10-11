@@ -107,8 +107,9 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (res.status === 401 && token && !path.startsWith("/v1/auth/")) onUnauthorized();
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `Request failed (${res.status})`);
+    const body = (await res.json().catch(() => ({}))) as { error?: string; stage?: string; detail?: string };
+    // Server start-up problems (503) carry a redacted hint such as "database: ECONNREFUSED"; show it so the owner can fix the setup.
+    throw new Error(body.stage && body.detail ? `${body.error} (${body.stage}: ${body.detail})` : (body.error ?? `Request failed (${res.status})`));
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }

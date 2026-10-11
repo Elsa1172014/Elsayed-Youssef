@@ -17,7 +17,7 @@ export async function openDb(env = process.env): Promise<Db> {
   const url = databaseUrl(env);
   if (url) {
     const { default: pg } = await import("pg");
-    db = new pg.Pool({ connectionString: url, max: Number(env.PG_POOL_MAX ?? 10) }) as unknown as Db;
+    db = new pg.Pool({ connectionString: url, max: Number(env.PG_POOL_MAX ?? 10), connectionTimeoutMillis: 10_000, idleTimeoutMillis: 10_000 }) as unknown as Db;
   } else {
     if (env.NODE_ENV === "production") throw new Error("DATABASE_URL is required in production");
     const { PGlite } = await import("@electric-sql/pglite");
