@@ -30,3 +30,7 @@ button.link { background: none; border: 0; color: #4c8dff; cursor: pointer; text
 .account { display: grid; gap: 8px; max-width: 360px; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .filters input { flex: 1; min-width: 160px; }
+.rowwrap { display: flex; align-items: center; gap: 6px; flex: 1; }
+.rowwrap .row { flex: 1; }
+button.ai { border: 0; background: none; cursor: pointer; color: #4c8dff; font-size: 1rem; }
+.ai-panel { padding: 8px; border: 1px solid #8884; border-radius: 6px; margin: 4px 0 8px; display: grid; gap: 6px; }

@@ -10,6 +10,8 @@ x-api: &api
     SECRET_KEY: ${SECRET_KEY:?run ./scripts/setup.sh to create .env}
     TRUST_PROXY: "true" # the api is only reachable through Caddy, which sets X-Forwarded-For
     IPTV_ORG_API: ${IPTV_ORG_API:-https://iptv-org.github.io/api}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-} # optional: enables AI summaries/translation
+    AI_MODEL: ${AI_MODEL:-}
 
 services:
   db:

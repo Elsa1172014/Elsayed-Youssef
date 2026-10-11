@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CatalogChannel, SourcedProgramme, WatchEvent, XmltvChannel } from "@receiver/core";
+import type { CatalogChannel, PremiumChannel, SourcedProgramme, WatchEvent, XmltvChannel } from "@receiver/core";
 import type { Db } from "./db";
 
 export type SourceType = "m3u_url" | "m3u_file" | "xtream" | "xmltv" | "tuner";
@@ -26,8 +26,14 @@ export interface UserChannel {
   /** May contain {username}/{password} placeholders for Xtream channels; resolve via the stream endpoint. */
   streamUrl: string;
   epgChannelId?: string;
+  /** Directory (Premium) entry this channel of the user's own subscription is linked to. */
+  premiumId?: string;
   sortOrder: number;
   hidden: boolean;
+}
+
+export interface PremiumEntry extends PremiumChannel {
+  status: "active" | "blocked" | "closed";
 }
 
 export interface CatalogStream {
@@ -62,12 +68,12 @@ const toSource = (r: Row): UserSource => ({
 const toChannel = (r: Row): UserChannel => ({
   id: r.id as string, userId: r.user_id as string, sourceId: opt(r.source_id as string | null), name: r.name as string,
   logoUrl: opt(r.logo_url as string | null), group: opt(r.group_name as string | null), streamUrl: r.stream_url as string,
-  epgChannelId: opt(r.epg_channel_id as string | null), sortOrder: r.sort_order as number, hidden: r.hidden as boolean,
+  epgChannelId: opt(r.epg_channel_id as string | null), premiumId: opt(r.premium_id as string | null), sortOrder: r.sort_order as number, hidden: r.hidden as boolean,
 });
 
 const CHANNEL_COLS: Record<string, string> = {
   name: "name", logoUrl: "logo_url", group: "group_name", streamUrl: "stream_url",
-  epgChannelId: "epg_channel_id", sortOrder: "sort_order", hidden: "hidden",
+  epgChannelId: "epg_channel_id", premiumId: "premium_id", sortOrder: "sort_order", hidden: "hidden",
 };
 const SOURCE_COLS: Record<string, string> = { name: "name", enabled: "enabled", url: "url", lastSyncAt: "last_sync_at" };
 
@@ -340,5 +346,71 @@ export class Store {
   }
   async recordStreamHealth(id: number, status: "ok" | "dead", latencyMs?: number) {
     await this.db.query("UPDATE catalog_streams SET status=$2, latency_ms=$3, last_checked_at=now() WHERE id=$1", [id, status, latencyMs ?? null]);
+  }
+
+  // ---- premium directory (metadata only) ----
+  async upsertPremium(channels: PremiumChannel[], stamp = new Date().toISOString()): Promise<string> {
+    const CH = 500;
+    for (let i = 0; i < channels.length; i += CH) {
+      const chunk = channels.slice(i, i + CH);
+      const vals: unknown[] = [];
+      const rows = chunk.map((c) => {
+        const b = vals.length;
+        vals.push(c.id, c.name, c.country ?? null, JSON.stringify(c.languages), JSON.stringify(c.categories), c.logoUrl ?? null, c.website ?? null, stamp);
+        return `($${b + 1},$${b + 2},$${b + 3},$${b + 4}::jsonb,$${b + 5}::jsonb,$${b + 6},$${b + 7},$${b + 8}::timestamptz)`;
+      });
+      await this.db.query(
+        `INSERT INTO premium_channels (id,name,country,languages,categories,logo_url,website,updated_at) VALUES ${rows.join(",")}
+         ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,country=EXCLUDED.country,languages=EXCLUDED.languages,categories=EXCLUDED.categories,
+           logo_url=EXCLUDED.logo_url,website=EXCLUDED.website,updated_at=EXCLUDED.updated_at,
+           status=CASE WHEN premium_channels.status='blocked' THEN 'blocked' ELSE 'active' END`,
+        vals,
+      );
+    }
+    return stamp;
+  }
+  async prunePremium(stamp: string): Promise<number> {
+    return (await this.db.query("UPDATE premium_channels SET status='closed' WHERE status='active' AND updated_at<$1::timestamptz RETURNING id", [stamp])).rows.length;
+  }
+  async countActivePremium(): Promise<number> {
+    return Number((await this.db.query<{ n: string }>("SELECT count(*) AS n FROM premium_channels WHERE status='active'")).rows[0]?.n ?? 0);
+  }
+  private premiumWhere(opts: CatalogFilter) {
+    const where = ["status='active'"];
+    const vals: unknown[] = [];
+    if (opts.q) { vals.push(`%${opts.q.replace(/[\\%_]/g, "")}%`); where.push(`name ILIKE $${vals.length}`); }
+    if (opts.country) { vals.push(opts.country.toUpperCase()); where.push(`country=$${vals.length}`); }
+    if (opts.category) { vals.push(JSON.stringify([opts.category.toLowerCase()])); where.push(`categories @> $${vals.length}::jsonb`); }
+    if (opts.language) { vals.push(JSON.stringify([opts.language.toLowerCase()])); where.push(`languages @> $${vals.length}::jsonb`); }
+    return { sql: where.join(" AND "), vals };
+  }
+  private toPremium = (r: Row): PremiumEntry => ({
+    id: r.id as string, name: r.name as string, country: opt(r.country as string | null), languages: r.languages as string[],
+    categories: r.categories as string[], logoUrl: opt(r.logo_url as string | null), website: opt(r.website as string | null), status: r.status as PremiumEntry["status"],
+  });
+  async searchPremium(opts: CatalogFilter & { limit?: number; offset?: number }) {
+    const { sql, vals } = this.premiumWhere(opts);
+    vals.push(Math.min(opts.limit ?? 50, 200), Math.max(opts.offset ?? 0, 0));
+    return (await this.db.query(`SELECT * FROM premium_channels WHERE ${sql} ORDER BY name, id LIMIT $${vals.length - 1} OFFSET $${vals.length}`, vals)).rows.map(this.toPremium);
+  }
+  async countPremium(opts: CatalogFilter): Promise<number> {
+    const { sql, vals } = this.premiumWhere(opts);
+    return Number((await this.db.query<{ n: string }>(`SELECT count(*) AS n FROM premium_channels WHERE ${sql}`, vals)).rows[0]?.n ?? 0);
+  }
+  async premiumFacets() {
+    const q = async (sql: string) => (await this.db.query<{ v: string; n: string }>(sql)).rows.map((r) => ({ value: r.v, count: Number(r.n) }));
+    return {
+      countries: await q("SELECT country AS v, count(*) AS n FROM premium_channels WHERE status='active' AND country IS NOT NULL GROUP BY country ORDER BY country"),
+      categories: await q("SELECT c AS v, count(*) AS n FROM premium_channels, jsonb_array_elements_text(categories) c WHERE status='active' GROUP BY c ORDER BY c"),
+      languages: await q("SELECT l AS v, count(*) AS n FROM premium_channels, jsonb_array_elements_text(languages) l WHERE status='active' GROUP BY l ORDER BY l"),
+      total: await this.countPremium({}),
+    };
+  }
+  async getPremium(id: string) {
+    const r = (await this.db.query("SELECT * FROM premium_channels WHERE id=$1 AND status='active'", [id])).rows[0];
+    return r ? this.toPremium(r) : undefined;
+  }
+  async setPremiumStatus(id: string, status: PremiumEntry["status"]) {
+    return (await this.db.query("UPDATE premium_channels SET status=$2 WHERE id=$1 RETURNING id", [id, status])).rows.length > 0;
   }
 }

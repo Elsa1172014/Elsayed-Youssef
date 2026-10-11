@@ -127,3 +127,59 @@ export function parseOfficialList(json: unknown): CatalogChannel[] {
   }
   return out;
 }
+
+export interface PremiumChannel {
+  id: string;
+  name: string;
+  country?: string;
+  languages: string[];
+  categories: string[];
+  logoUrl?: string;
+  website?: string;
+}
+
+/**
+ * Metadata-only directory of channels that have NO free public stream in the open directory
+ * (typically subscription/encrypted/regional channels). It carries no stream URLs of any kind: playback is only
+ * possible through a subscription the user owns and enters themselves. Same exclusions as the free catalog
+ * (blocklisted, closed, NSFW/adult). We cannot tell which of these are encrypted; "no free stream" is what we know.
+ */
+export function mapIptvOrgPremium(channels: unknown, streams: unknown, extras: IptvOrgExtras = {}): PremiumChannel[] {
+  if (!Array.isArray(channels) || !Array.isArray(streams)) return [];
+  const free = new Set(mapIptvOrg(channels, streams, extras).map((c) => c.id));
+  const blocked = new Set<string>();
+  if (Array.isArray(extras.blocklist)) for (const b of extras.blocklist as Json[]) if (str(b.channel)) blocked.add(str(b.channel)!);
+  const logoBy = new Map<string, { url: string; score: number }>();
+  if (Array.isArray(extras.logos)) {
+    for (const l of extras.logos as Json[]) {
+      const id = str(l.channel);
+      const u = publicHttp(str(l.url));
+      if (!id || !u) continue;
+      const score = (l.in_use === true ? 1_000_000 : 0) + (typeof l.width === "number" ? l.width : 0);
+      if (score > (logoBy.get(id)?.score ?? -1)) logoBy.set(id, { url: u, score });
+    }
+  }
+  const langBy = new Map<string, Set<string>>();
+  if (Array.isArray(extras.feeds)) {
+    for (const f of extras.feeds as Json[]) {
+      const id = str(f.channel);
+      if (!id) continue;
+      const set = langBy.get(id) ?? new Set<string>();
+      for (const l of strs(f.languages)) set.add(l);
+      langBy.set(id, set);
+    }
+  }
+  const out: PremiumChannel[] = [];
+  for (const raw of channels as Json[]) {
+    const id = str(raw.id);
+    const name = str(raw.name);
+    if (!id || !name || free.has(id) || blocked.has(id) || raw.is_nsfw === true || str(raw.closed)) continue;
+    const categories = strs(raw.categories);
+    if (categories.includes("xxx")) continue;
+    out.push({
+      id, name, country: str(raw.country), languages: [...(langBy.get(id) ?? [])], categories,
+      logoUrl: logoBy.get(id)?.url ?? publicHttp(str(raw.logo)), website: publicHttp(str(raw.website)),
+    });
+  }
+  return out;
+}

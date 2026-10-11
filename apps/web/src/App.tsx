@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, persistToken, setBase, setOnUnauthorized, setToken, storedToken, type Channel, type NowNext, type Suggestion } from "./api";
 import { t, type Lang } from "./i18n";
 import { Player } from "./Player";
-import { CatalogView, GuideView, ManageView } from "./views";
+import { AiButton } from "./AiPanel";
+import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
 
-type Tab = "live" | "guide" | "catalog" | "manage";
+type Tab = "live" | "guide" | "catalog" | "premium" | "manage";
 
 // Packaged TV builds (Tizen/webOS) set VITE_API_BASE at build time; the web build uses the dev proxy / same origin.
 setBase((import.meta.env.VITE_API_BASE as string | undefined) ?? "");
@@ -68,7 +69,7 @@ export function App() {
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
-  const tabs: Tab[] = ["live", "guide", "catalog", "manage"];
+  const tabs: Tab[] = ["live", "guide", "catalog", "premium", "manage"];
   return (
     <div className="app" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <header>
@@ -95,10 +96,13 @@ export function App() {
             <ul>
               {visible.map((c) => (
                 <li key={c.id} className={selected?.id === c.id ? "active" : ""}>
-                  <button className="row" onClick={() => setSelected(c)}>
-                    <strong>{c.name}</strong>
-                    <small>{nowNext[c.id]?.now ? (nowNext[c.id]!.now as { title: string }).title : c.group ?? ""}</small>
-                  </button>
+                  <div className="rowwrap">
+                    <button className="row" onClick={() => setSelected(c)}>
+                      <strong>{c.name}</strong>
+                      <small>{nowNext[c.id]?.now ? (nowNext[c.id]!.now as { title: string }).title : c.group ?? ""}</small>
+                    </button>
+                    <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={(x) => setSelected(x)} />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -117,6 +121,7 @@ export function App() {
       <div className="page">
         {tab === "guide" && <GuideView channels={channels.filter((c) => !c.hidden)} />}
         {tab === "catalog" && <CatalogView s={s} run={run} refresh={refresh} />}
+        {tab === "premium" && <PremiumView s={s} lang={lang} channels={channels} refresh={refresh} run={run} onPlay={(c) => { setSelected(c); setTab("live"); }} />}
         {tab === "manage" && <ManageView s={s} channels={channels} suggestions={suggestions} refresh={refresh} run={run} onAccountDeleted={signOut} />}
       </div>
     </div>

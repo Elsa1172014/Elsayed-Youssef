@@ -1,4 +1,4 @@
-import { mapIptvOrg, parseOfficialList, probeStream, type CatalogChannel } from "@receiver/core";
+import { mapIptvOrg, mapIptvOrgPremium, parseOfficialList, probeStream, type CatalogChannel } from "@receiver/core";
 import type { SafeFetch } from "../safeFetch";
 import type { Store } from "../store";
 
@@ -7,7 +7,8 @@ export const IPTV_ORG_API = process.env.IPTV_ORG_API ?? "https://iptv-org.github
 export interface SyncResult {
   channels: number;
   streams: number;
-  pruned?: { closed: number; streamsRemoved: number };
+  premium: number;
+  pruned?: { closed: number; streamsRemoved: number; premiumClosed: number };
   skippedPrune?: string;
 }
 
@@ -31,13 +32,16 @@ export async function syncIptvOrg(store: Store, fetcher: SafeFetch, base = IPTV_
   const blocklist = await getJson("blocklist", true);
   const [logos, feeds] = [await getJson("logos", false), await getJson("feeds", false)];
   const mapped = mapIptvOrg(channels, streams, { logos, feeds, blocklist });
-  const result: SyncResult = { channels: mapped.length, streams: mapped.reduce((n, c) => n + c.streams.length, 0) };
+  const premium = mapIptvOrgPremium(channels, streams, { logos, feeds, blocklist });
+  const result: SyncResult = { channels: mapped.length, streams: mapped.reduce((n, c) => n + c.streams.length, 0), premium: premium.length };
   const before = await store.countActiveDirectory();
+  const beforePremium = await store.countActivePremium();
   const stamp = await store.upsertCatalog(mapped);
+  await store.upsertPremium(premium, stamp);
   if (before > 0 && mapped.length < before * 0.5) {
     result.skippedPrune = `only ${mapped.length} channels vs ${before} before; looks incomplete`;
   } else {
-    result.pruned = await store.pruneDirectory(stamp);
+    result.pruned = { ...(await store.pruneDirectory(stamp)), premiumClosed: beforePremium > 0 && premium.length < beforePremium * 0.5 ? 0 : await store.prunePremium(stamp) };
   }
   await store.setSyncState("iptv-org", JSON.stringify(result));
   return result;

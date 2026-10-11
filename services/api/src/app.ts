@@ -1,9 +1,10 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   assertPublicHttpUrl, fillCredentials, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
-  parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
+  matchOwnChannels, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
   xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
+import { clip, LANGS, plainSummary, SUMMARY_SYSTEM, TRANSLATE_SYSTEM, type Lang, type TextModel } from "./ai";
 import { AuthError, bearerToken, type AuthService, type Authenticator } from "./auth";
 import { AttemptLimiter } from "./rateLimit";
 import type { SecretBox } from "./crypto";
@@ -21,6 +22,8 @@ interface Deps {
   /** Comma-separated browser origins allowed to call the API cross-origin (e.g. packaged TV apps). */
   allowedOrigins?: string[];
   trustProxy?: boolean;
+  /** Optional text model for AI helpers; without it summaries use a rule-based fallback and translation is unavailable. */
+  model?: TextModel;
   secrets: SecretBox;
   fetcher: SafeFetch;
   now?: () => Date;
@@ -36,9 +39,10 @@ interface Creds {
   password: string;
 }
 
-export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedOrigins = [], trustProxy = false, now = () => new Date() }: Deps): FastifyInstance {
+export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedOrigins = [], trustProxy = false, model, now = () => new Date() }: Deps): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES, trustProxy });
   const loginLimiter = new AttemptLimiter(5, 15 * 60_000, () => now().getTime());
+  const aiLimiter = new AttemptLimiter(60, 3600_000, () => now().getTime()); // per user per hour: bounds model cost
   const registerLimiter = new AttemptLimiter(10, 60 * 60_000, () => now().getTime());
 
   app.addHook("onRequest", async (req, reply) => {
@@ -423,6 +427,97 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedO
       sortOrder: await store.nextSortOrder(uid), hidden: false,
     });
     return reply.code(201).send(row);
+  });
+
+  // ---- Premium directory: metadata only. No stream URLs; playback only via the user's own subscription. ----
+  app.get("/v1/premium", async (req, reply) => {
+    const q = req.query as Record<string, string | undefined>;
+    const f = filterOf(q);
+    reply.header("x-total-count", await store.countPremium(f));
+    return store.searchPremium({ ...f, limit: Number(q.limit) || undefined, offset: Number(q.offset) || undefined });
+  });
+
+  app.get("/v1/premium/facets", async () => store.premiumFacets());
+
+  /** The user's own channels that look like this directory entry (e.g. from their Xtream subscription). */
+  app.get("/v1/premium/:id/matches", async (req, reply) => {
+    const uid = uidOf(req);
+    const p = await store.getPremium((req.params as { id: string }).id);
+    if (!p) return bad(reply, "Not found", 404);
+    return matchOwnChannels(p.name, (await store.listChannels(uid)).filter((c) => !c.premiumId || c.premiumId === p.id));
+  });
+
+  /** Links one of the user's own channels to a directory entry: groups it under Premium and borrows the logo and guide match. */
+  app.post("/v1/premium/:id/link", async (req, reply) => {
+    const uid = uidOf(req);
+    const p = await store.getPremium((req.params as { id: string }).id);
+    const ch = typeof body(req).channelId === "string" ? await store.getChannel(uid, body(req).channelId as string) : undefined;
+    if (!p || !ch) return bad(reply, "Not found", 404);
+    const patch: Partial<Omit<UserChannel, "id" | "userId" | "sourceId">> = { premiumId: p.id };
+    if (!ch.logoUrl && p.logoUrl) patch.logoUrl = p.logoUrl;
+    if (!ch.epgChannelId) {
+      const g = suggestEpgMappings([{ id: ch.id, name: p.name }], await store.listGuideChannels(uid), 0.85)[0];
+      if (g) patch.epgChannelId = g.epgChannelId;
+    }
+    return store.updateChannel(uid, ch.id, patch);
+  });
+
+  app.delete("/v1/premium/link/:channelId", async (req, reply) => {
+    const r = await store.updateChannel(uidOf(req), (req.params as { channelId: string }).channelId, { premiumId: undefined });
+    return r ? reply.code(204).send() : bad(reply, "Not found", 404);
+  });
+
+  // ---- AI helpers (per-channel). Only channel names and guide text leave the server, and only when a model is configured. ----
+  const aiGate = (uid: string, reply: FastifyReply) => {
+    aiLimiter.fail(uid);
+    const wait = aiLimiter.blockedFor(uid);
+    if (wait) { reply.header("retry-after", wait).code(429).send({ error: "AI request limit reached, try again later" }); return false; }
+    return true;
+  };
+  const langOf = (v: unknown): Lang => (v === "ar" ? "ar" : "en");
+
+  app.post("/v1/ai/channels/:id/summary", async (req, reply) => {
+    const uid = uidOf(req);
+    if (!aiGate(uid, reply)) return;
+    const ch = await store.getChannel(uid, (req.params as { id: string }).id);
+    if (!ch) return bad(reply, "Not found", 404);
+    const lang = langOf(body(req).lang);
+    const t = now().toISOString();
+    const list = ch.epgChannelId ? await programmesFor(uid, ch.epgChannelId, t, new Date(now().getTime() + 6 * 3600_000).toISOString()) : [];
+    const cur = list.find((p) => p.start <= t && p.stop > t);
+    const nxt = list.find((p) => p.start > t);
+    const fallback = plainSummary(ch.name, cur, nxt, lang);
+    if (!model || (!cur && !nxt)) return { summary: fallback, ai: false };
+    try {
+      const data = [cur && `NOW: ${clip(cur.title, 200)} — ${clip(cur.description, 500)}`, nxt && `NEXT: ${clip(nxt.title, 200)} (starts ${nxt.start})`].filter(Boolean).join("\n");
+      return { summary: await model.complete(SUMMARY_SYSTEM(lang), `Channel: ${clip(ch.name, 100)}\n${data}`, 200), ai: true };
+    } catch {
+      return { summary: fallback, ai: false };
+    }
+  });
+
+  app.post("/v1/ai/translate", async (req, reply) => {
+    const uid = uidOf(req);
+    const b = body(req);
+    const text = str(b.text, 2000);
+    if (!text) return bad(reply, "text is required (max 2000 characters)");
+    if (!model) return bad(reply, "Translation needs an AI model: set ANTHROPIC_API_KEY on the server", 503);
+    if (!aiGate(uid, reply)) return;
+    try {
+      return { text: await model.complete(TRANSLATE_SYSTEM(langOf(b.to)), text, 800), to: langOf(b.to) };
+    } catch {
+      return bad(reply, "Translation failed, try again later", 502);
+    }
+  });
+
+  /** "More like this": nearest of the user's own channels by name/group/what's on (no model needed). */
+  app.get("/v1/me/channels/:id/similar", async (req, reply) => {
+    const uid = uidOf(req);
+    const all = await store.listChannels(uid);
+    const me = all.find((c) => c.id === (req.params as { id: string }).id);
+    if (!me) return bad(reply, "Not found", 404);
+    const text = (c: UserChannel) => `${c.name} ${c.group ?? ""}`;
+    return nearest(embedder.embed(text(me)), all.filter((c) => c.id !== me.id && !c.hidden).map((c) => ({ id: c.id, vector: embedder.embed(text(c)) })), 8, 0.35);
   });
 
   // ---- Discovery: hybrid lexical + embedding search, recommendations (own channels only) ----

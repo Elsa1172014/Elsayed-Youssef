@@ -1,5 +1,7 @@
 export interface Channel {
   id: string;
+  sourceId?: string;
+  premiumId?: string;
   name: string;
   streamUrl: string;
   logoUrl?: string;
@@ -43,6 +45,15 @@ export interface CatalogFilter {
   country?: string;
   category?: string;
   language?: string;
+}
+export interface PremiumEntry {
+  id: string;
+  name: string;
+  country?: string;
+  languages: string[];
+  categories: string[];
+  logoUrl?: string;
+  website?: string;
 }
 export interface Facet {
   value: string;
@@ -143,6 +154,21 @@ export const api = {
     return { items: (await res.json()) as CatalogEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
+  premium: async (f: CatalogFilter, offset = 0) => {
+    const qs = new URLSearchParams({ offset: String(offset), limit: "50" });
+    for (const [k, v] of Object.entries(f)) if (v) qs.set(k, v);
+    const res = await fetch(`${base}/v1/premium?${qs}`, { headers: { authorization: `Bearer ${token}` } });
+    if (res.status === 401) onUnauthorized();
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    return { items: (await res.json()) as PremiumEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
+  },
+  premiumFacets: () => call<Facets>("/v1/premium/facets"),
+  premiumMatches: (id: string) => call<{ channelId: string; confidence: number }[]>(`/v1/premium/${encodeURIComponent(id)}/matches`),
+  premiumLink: (id: string, channelId: string) => call<Channel>(`/v1/premium/${encodeURIComponent(id)}/link`, json("POST", { channelId })),
+  premiumUnlink: (channelId: string) => call<void>(`/v1/premium/link/${channelId}`, json("DELETE")),
+  aiSummary: (channelId: string, lang: string) => call<{ summary: string; ai: boolean }>(`/v1/ai/channels/${channelId}/summary`, json("POST", { lang })),
+  aiTranslate: (text: string, to: string) => call<{ text: string }>("/v1/ai/translate", json("POST", { text, to })),
+  similar: (channelId: string) => call<{ id: string; score: number }[]>(`/v1/me/channels/${channelId}/similar`),
   importCatalog: (f: CatalogFilter, limit = 20000) => call<{ added: number; skipped: number }>("/v1/catalog/import", json("POST", { ...f, limit })),
   addFromCatalog: (id: string) => call<Channel>(`/v1/catalog/${encodeURIComponent(id)}/add`, json("POST")),
   clearHistory: () => call<void>("/v1/me/watch-events", json("DELETE")),

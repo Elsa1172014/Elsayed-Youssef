@@ -30,3 +30,17 @@ export function suggestEpgMappings(
   }
   return out;
 }
+
+export interface ChannelMatch {
+  channelId: string;
+  confidence: number;
+}
+
+/** Finds the user's own channels (e.g. from their subscription) that look like a directory channel. Suggestions only. */
+export function matchOwnChannels(targetName: string, own: { id: string; name: string }[], threshold = 0.8, limit = 5): ChannelMatch[] {
+  return own
+    .map((c) => ({ channelId: c.id, confidence: Math.round(similarity(targetName, c.name) * 100) / 100 }))
+    .filter((m) => m.confidence >= threshold)
+    .sort((a, b) => b.confidence - a.confidence || a.channelId.localeCompare(b.channelId))
+    .slice(0, limit);
+}

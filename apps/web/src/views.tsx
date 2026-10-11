@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, type CatalogEntry, type CatalogFilter, type Channel, type Facet, type Facets, type Grid, type Source, type Suggestion } from "./api";
-import type { Strings } from "./i18n";
+import { api, type CatalogEntry, type CatalogFilter, type Channel, type Facet, type Facets, type Grid, type PremiumEntry, type Source, type Suggestion } from "./api";
+import { AiButton } from "./AiPanel";
+import type { Lang, Strings } from "./i18n";
 
 type Run = (fn: () => Promise<unknown>) => Promise<void>;
 
@@ -173,6 +174,84 @@ function AccountPanel({ s, run, onDeleted }: { s: Strings; run: Run; onDeleted: 
       <input type="password" placeholder={s.newPassword} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
       <button disabled={!current || next.length < 10} onClick={() => run(async () => { await api.changePassword(current, next); setCurrent(""); setNext(""); })}>{s.changePassword}</button>
       <button disabled={!current} onClick={() => run(async () => { await api.deleteAccount(current); onDeleted(); })}>{s.deleteAccount}</button>
+    </div>
+  );
+}
+
+export function PremiumView({
+  s, lang, channels, refresh, run, onPlay,
+}: { s: Strings; lang: Lang; channels: Channel[]; refresh: () => Promise<unknown>; run: Run; onPlay: (c: Channel) => void }) {
+  const [f, setF] = useState<CatalogFilter>({});
+  const [facets, setFacets] = useState<Facets | null>(null);
+  const [items, setItems] = useState<PremiumEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [matches, setMatches] = useState<Record<string, { channelId: string; confidence: number }[]>>({});
+  const [xtreamIds, setXtreamIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    void api.premiumFacets().then(setFacets).catch(() => setFacets(null));
+    void api.sources().then((src) => setXtreamIds(new Set(src.filter((x) => x.type === "xtream").map((x) => x.id)))).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const h = setTimeout(() => void api.premium(f).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => setItems([])), 250);
+    return () => clearTimeout(h);
+  }, [f]);
+  const sel = (key: keyof CatalogFilter, label: string, list: Facet[] | undefined) => (
+    <select aria-label={label} value={f[key] ?? ""} onChange={(e) => setF({ ...f, [key]: e.target.value || undefined })}>
+      <option value="">{label}</option>
+      {(list ?? []).map((x) => <option key={x.value} value={x.value}>{x.value} ({x.count})</option>)}
+    </select>
+  );
+  const act = (fn: () => Promise<unknown>) => run(async () => { await fn(); await refresh(); });
+  const mine = channels.filter((c) => c.premiumId || (c.sourceId && xtreamIds.has(c.sourceId)));
+  const nameOf = (id: string) => channels.find((c) => c.id === id)?.name ?? id;
+
+  return (
+    <div>
+      <p className="hint" role="note">{s.premiumNote}</p>
+
+      <h3>{s.mySubscription} ({mine.length})</h3>
+      <ul>
+        {mine.slice(0, 200).map((c) => (
+          <li key={c.id} className="cat">
+            <span className="rowwrap">
+              <button className="link" onClick={() => onPlay(c)}>{c.name}</button>
+              {c.premiumId && <small> ✓ {c.premiumId}</small>}
+              <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={onPlay} />
+            </span>
+            {c.premiumId && <button onClick={() => act(() => api.premiumUnlink(c.id))}>{s.unlink}</button>}
+          </li>
+        ))}
+      </ul>
+
+      <h3>{s.premium}</h3>
+      <div className="filters">
+        <input value={f.q ?? ""} onChange={(e) => setF({ ...f, q: e.target.value || undefined })} placeholder={s.search} />
+        {sel("country", s.country, facets?.countries)}
+        {sel("category", s.category, facets?.categories)}
+        {sel("language", s.language, facets?.languages)}
+      </div>
+      <p><strong>{total.toLocaleString()}</strong> {s.premium}</p>
+      <ul>
+        {items.map((p) => (
+          <li key={p.id} className="cat">
+            <span className="rowwrap">
+              {p.logoUrl && <img src={p.logoUrl} alt="" width={28} height={28} loading="lazy" referrerPolicy="no-referrer" />}
+              <span><strong>{p.name}</strong> <small>{[p.country, p.categories[0], p.languages[0]].filter(Boolean).join(" · ")}</small></span>
+            </span>
+            <span>
+              <button onClick={() => void run(async () => setMatches({ ...matches, [p.id]: await api.premiumMatches(p.id) }))}>{s.findMine}</button>
+              {matches[p.id] && (matches[p.id]!.length === 0
+                ? <small> {s.noMatches}</small>
+                : matches[p.id]!.map((m) => (
+                  <button key={m.channelId} onClick={() => act(() => api.premiumLink(p.id, m.channelId))}>{s.link}: {nameOf(m.channelId)} ({Math.round(m.confidence * 100)}%)</button>
+                )))}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {items.length < total && (
+        <button onClick={() => void api.premium(f, items.length).then((r) => setItems([...items, ...r.items])).catch(() => undefined)}>{s.more}</button>
+      )}
     </div>
   );
 }

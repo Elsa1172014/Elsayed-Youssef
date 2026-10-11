@@ -110,3 +110,27 @@ describe("embeddings", () => {
     expect(fuseRankings([["a", "b"], ["b", "c"]])[0]).toBe("b");
   });
 });
+
+import { mapIptvOrgPremium, matchOwnChannels } from "../src";
+
+describe("premium directory", () => {
+  const channels = [
+    { id: "Free.xx", name: "Free One", country: "XX", categories: ["news"] },
+    { id: "Pay.xx", name: "Pay Sports", country: "XX", categories: ["sports"], website: "https://pay.example" },
+    { id: "Closed.xx", name: "Closed", closed: "2019-01-01" },
+    { id: "Nsfw.xx", name: "N", is_nsfw: true },
+    { id: "Blocked.xx", name: "B" },
+    { id: "Adult.xx", name: "A", categories: ["xxx"] },
+  ];
+  const streams = [{ channel: "Free.xx", url: "https://free.example/a.m3u8" }, { channel: "Pay.xx", url: "https://x.example/y.m3u8", referrer: "https://spoof" }];
+  it("lists only channels without a free stream, as metadata with no stream URLs", () => {
+    const r = mapIptvOrgPremium(channels, streams, { blocklist: [{ channel: "Blocked.xx" }], logos: [{ channel: "Pay.xx", url: "https://pay.example/l.png", in_use: true, width: 100 }] });
+    expect(r.map((c) => c.id)).toEqual(["Pay.xx"]);
+    expect(r[0]).toMatchObject({ name: "Pay Sports", logoUrl: "https://pay.example/l.png", website: "https://pay.example/" });
+    expect(JSON.stringify(r)).not.toMatch(/m3u8|stream/i);
+  });
+  it("suggests the user's own matching channels", () => {
+    const m = matchOwnChannels("beIN Sports 1", [{ id: "a", name: "beIN SPORTS 1 HD" }, { id: "b", name: "Cartoon Kids" }]);
+    expect(m.map((x) => x.channelId)).toEqual(["a"]);
+  });
+});
