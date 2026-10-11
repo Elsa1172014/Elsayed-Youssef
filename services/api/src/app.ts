@@ -465,6 +465,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     if (!best) return bad(reply, "No stream available", 409);
     const row = await store.addChannel({
       userId: uid, name: entry.name, streamUrl: best.url, logoUrl: entry.logoUrl, group: entry.categories[0],
+      country: entry.country, languages: entry.languages, categories: entry.categories,
       sortOrder: await store.nextSortOrder(uid), hidden: false,
     });
     return reply.code(201).send(row);

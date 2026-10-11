@@ -11,7 +11,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 li.active .row { background: #4c8dff33; }
 small, .hint { opacity: 0.7; }
 .player { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
-.player video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 78vh; background: #000; }
+.player video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 70vh; background: #000; }
 .player:fullscreen video { max-height: none; height: 100vh; aspect-ratio: auto; }
 .player.theater { position: fixed; inset: 0; z-index: 50; border-radius: 0; }
 .player.theater video { max-height: none; height: 100vh; aspect-ratio: auto; }
@@ -41,3 +41,16 @@ button.link { background: none; border: 0; color: #4c8dff; cursor: pointer; text
 .rowwrap .row { flex: 1; }
 button.ai { border: 0; background: none; cursor: pointer; color: #4c8dff; font-size: 1rem; }
 .ai-panel { padding: 8px; border: 1px solid #8884; border-radius: 6px; margin: 4px 0 8px; display: grid; gap: 6px; }
+
+/* Floating player: stays in view while the channel list scrolls (desktop: beside the list; phone: pinned on top). */
+.main { position: sticky; top: 8px; align-self: start; z-index: 5; }
+@media (max-width: 900px) {
+  .main { top: 0; background: Canvas; padding-bottom: 4px; }
+  .player video { max-height: 38vh; }
+  .main h2 { font-size: 1rem; margin: 6px 0 2px; }
+  .main p { margin: 2px 0; font-size: 0.85rem; }
+}
+.groups { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.groups button { border: 1px solid #8886; border-radius: 999px; padding: 4px 10px; background: none; color: inherit; cursor: pointer; }
+.groups button[aria-selected="true"] { background: #4c8dff; color: #fff; border-color: #4c8dff; }
+.more { width: 100%; margin: 8px 0; padding: 8px; }

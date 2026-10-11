@@ -6,6 +6,9 @@ export interface Channel {
   streamUrl: string;
   logoUrl?: string;
   group?: string;
+  country?: string;
+  languages?: string[];
+  categories?: string[];
   epgChannelId?: string;
   sortOrder: number;
   hidden: boolean;

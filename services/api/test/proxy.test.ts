@@ -103,7 +103,7 @@ describe("HLS relay", () => {
 describe("bulk add", () => {
   it("adds ~10k catalog channels in one request, fast, and skips duplicates on the second run", async () => {
     const { app, db } = await makeApp();
-    await db.query(`INSERT INTO catalog_channels (id,name,country,provenance) SELECT 'c'||g, 'Channel '||lpad(g::text,5,'0'), 'EG', 'fta' FROM generate_series(1,10000) g`);
+    await db.query(`INSERT INTO catalog_channels (id,name,country,languages,categories,provenance) SELECT 'c'||g, 'Channel '||lpad(g::text,5,'0'), 'EG', '["ara"]'::jsonb, '["news"]'::jsonb, 'fta' FROM generate_series(1,10000) g`);
     await db.query(`INSERT INTO catalog_streams (channel_id,url,status) SELECT 'c'||g, 'http://s.example/'||g||'.m3u8', 'unknown' FROM generate_series(1,10000) g`);
     await db.query(`INSERT INTO catalog_streams (channel_id,url,status) SELECT 'c'||g, 'https://s.example/'||g||'.m3u8', 'unknown' FROM generate_series(1,10000,2) g`);
     const t = Date.now();
@@ -115,6 +115,7 @@ describe("bulk add", () => {
     expect(mine).toHaveLength(10000);
     expect(mine[0].name).toBe("Channel 00001");
     expect(mine[0].streamUrl).toBe("https://s.example/1.m3u8"); // HTTPS preferred
+    expect(mine[0]).toMatchObject({ country: "EG", languages: ["ara"], categories: ["news"], group: "news" }); // kept for grouping in the Live tab
     expect(mine[1].streamUrl).toBe("http://s.example/2.m3u8");
     expect((await app.inject({ method: "POST", url: "/v1/catalog/import", headers: alice, payload: { limit: 20000 } })).json()).toEqual({ added: 0, skipped: 10000 });
   });

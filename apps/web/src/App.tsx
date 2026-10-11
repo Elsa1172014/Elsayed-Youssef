@@ -5,6 +5,7 @@ import { Player } from "./Player";
 import { AiButton } from "./AiPanel";
 import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
+import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
 
 type Tab = "live" | "guide" | "catalog" | "premium" | "manage";
 
@@ -24,6 +25,8 @@ export function App() {
   const [nowNext, setNowNext] = useState<NowNext>({});
   const [selected, setSelected] = useState<Channel | null>(null);
   const [query, setQuery] = useState("");
+  const [group, setGroup] = useState<GroupId>("all");
+  const [limit, setLimit] = useState(200);
   const [hits, setHits] = useState<string[] | null>(null);
   const [recs, setRecs] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -69,8 +72,10 @@ export function App() {
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
-    return list.slice(0, 500); // thousands of channels: search or filter to find the rest
-  }, [channels, hits]);
+    return group === "all" ? list : list.filter((c) => groupsOf(c).includes(group));
+  }, [channels, hits, group]);
+  const counts = useMemo(() => groupCounts(channels.filter((c) => !c.hidden)), [channels]);
+  useEffect(() => setLimit(200), [group, hits]);
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
@@ -108,8 +113,17 @@ export function App() {
           <section className="list">
             {recs.length > 0 && !hits && <p className="hint">{s.forYou}: {recs.map((id) => channels.find((c) => c.id === id)?.name).filter(Boolean).slice(0, 3).join(", ")}</p>}
             {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length === 0 ? s.noChannelsYet : ""}</p>}
+            {!hits && (
+              <div className="groups" role="tablist" aria-label="Groups">
+                {GROUP_ORDER.filter((g) => g === "all" || counts[g] > 0).map((g) => (
+                  <button key={g} role="tab" aria-selected={group === g} aria-pressed={group === g} onClick={() => setGroup(g)}>
+                    {s[`g_${g}` as keyof typeof s]} <small>{counts[g]}</small>
+                  </button>
+                ))}
+              </div>
+            )}
             <ul>
-              {visible.map((c) => (
+              {visible.slice(0, limit).map((c) => (
                 <li key={c.id} className={selected?.id === c.id ? "active" : ""}>
                   <div className="rowwrap">
                     <button className="row" onClick={() => setSelected(c)}>
@@ -121,6 +135,7 @@ export function App() {
                 </li>
               ))}
             </ul>
+            {visible.length > limit && <button className="more" onClick={() => setLimit((n) => n + 300)}>{s.showMore} ({visible.length - limit})</button>}
           </section>
           <section className="main">
             {selected ? (
