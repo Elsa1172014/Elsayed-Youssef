@@ -177,3 +177,15 @@ describe("persistence", () => {
     }
   });
 });
+
+describe("source grouping", () => {
+  it("ties every imported channel to its named source", async () => {
+    const { app } = await makeApp();
+    const r = await app.inject({ method: "POST", url: "/v1/me/playlists/import", headers: alice, payload: { content: "#EXTM3U\n#EXTINF:-1,One\nhttps://a.example/1.m3u8\n#EXTINF:-1,Two\nhttps://a.example/2.m3u8", name: "Sports pack", ownershipAttested: true } });
+    const { sourceId } = r.json();
+    const sources = (await app.inject({ url: "/v1/me/sources", headers: alice })).json();
+    expect(sources.find((s: { id: string }) => s.id === sourceId).name).toBe("Sports pack");
+    const chans = (await app.inject({ url: "/v1/me/channels", headers: alice })).json();
+    expect(chans.filter((c: { sourceId?: string }) => c.sourceId === sourceId)).toHaveLength(2);
+  });
+});

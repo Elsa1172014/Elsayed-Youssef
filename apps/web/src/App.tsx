@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, persistToken, setBase, setOnUnauthorized, setToken, storedToken, type Channel, type NowNext, type Suggestion } from "./api";
+import { api, persistToken, setBase, setOnUnauthorized, setToken, storedToken, type Channel, type NowNext, type Source, type Suggestion } from "./api";
 import { t, type Lang } from "./i18n";
 import { Player } from "./Player";
 import { AiButton } from "./AiPanel";
@@ -25,7 +25,8 @@ export function App() {
   const [nowNext, setNowNext] = useState<NowNext>({});
   const [selected, setSelected] = useState<Channel | null>(null);
   const [query, setQuery] = useState("");
-  const [group, setGroup] = useState<GroupId>("all");
+  const [group, setGroup] = useState<string>("all"); // a GroupId, or "src:<sourceId>" for one of the user's own sources
+  const [sources, setSources] = useState<Source[]>([]);
   const [limit, setLimit] = useState(200);
   const [country, setCountry] = useState("");
   const [hits, setHits] = useState<string[] | null>(null);
@@ -62,6 +63,7 @@ export function App() {
       // (guide, recommendations, suggestions) never blanks it. A failed reload also keeps the previous list.
       const extras = Promise.allSettled([api.nowNext(), api.recommendations(), api.suggestions()]);
       void api.stats().then(setStats).catch(() => undefined);
+      void api.sources().then(setSources).catch(() => undefined);
       try {
         // Show the first pages immediately on a cold load; on a reload keep the current list until the new one is complete.
         setChannels(await api.channels((soFar) => setChannels((prev) => (prev.length ? prev : soFar))));
@@ -86,21 +88,31 @@ export function App() {
     if (signedIn && (tab === "live" || tab === "guide" || tab === "manage")) void refresh();
   }, [tab, signedIn, refresh]);
 
+  const inGroup = (c: Channel, g: string) => (g === "all" ? true : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
-    return list.filter((c) => (group === "all" || groupsOf(c).includes(group)) && (!country || c.country === country));
+    return list.filter((c) => inGroup(c, group) && (!country || c.country === country));
   }, [channels, hits, group, country]);
   // Countries present in the chosen group (so "Europe" can be narrowed to France, Germany, ...), with counts.
   const countries = useMemo(() => {
     const n = new Map<string, number>();
-    for (const c of channels) if (!c.hidden && c.country && (group === "all" || groupsOf(c).includes(group))) n.set(c.country, (n.get(c.country) ?? 0) + 1);
+    for (const c of channels) if (!c.hidden && c.country && inGroup(c, group)) n.set(c.country, (n.get(c.country) ?? 0) + 1);
     const names = (() => { try { return new Intl.DisplayNames([lang], { type: "region" }); } catch { return undefined; } })();
     return [...n].map(([code, count]) => ({ code, count, name: names?.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name));
   }, [channels, group, lang]);
   const counts = useMemo(() => groupCounts(channels.filter((c) => !c.hidden)), [channels]);
+  // One chip per source the user added, named as they named it, so it is clear which channels came from which file/provider.
+  const sourceCounts = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const c of channels) if (!c.hidden && c.sourceId) n.set(c.sourceId, (n.get(c.sourceId) ?? 0) + 1);
+    return n;
+  }, [channels]);
   useEffect(() => setLimit(200), [group, hits, country]);
   useEffect(() => setCountry(""), [group]);
+  useEffect(() => {
+    if (group.startsWith("src:") && sources.length > 0 && !sources.some((x) => `src:${x.id}` === group)) setGroup("all"); // the source was deleted
+  }, [group, sources]);
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
@@ -143,6 +155,11 @@ export function App() {
                 {GROUP_ORDER.filter((g) => g === "all" || counts[g] > 0).map((g) => (
                   <button key={g} role="tab" aria-selected={group === g} aria-pressed={group === g} onClick={() => setGroup(g)}>
                     {s[`g_${g}` as keyof typeof s]} <small>{counts[g]}</small>
+                  </button>
+                ))}
+                {sources.filter((src) => src.type !== "xmltv").map((src) => (
+                  <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => setGroup(`src:${src.id}`)}>
+                    ▤ {src.name} <small>{sourceCounts.get(src.id) ?? 0}</small>
                   </button>
                 ))}
                 {countries.length > 1 && (
