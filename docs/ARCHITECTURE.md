@@ -30,7 +30,7 @@ This is an architectural requirement, not a footnote. The system is designed so 
 
 **Enforcement mechanisms**
 
-1. **Source registry, not a stream proxy.** The backend stores *metadata and URLs*. Official/FAST/directory streams are played directly from their origin. User-supplied streams are played directly from the user's device to the user's provider; the backend never relays or caches media for them.
+1. **Source registry, not a stream proxy.** The backend stores *metadata and URLs*. Official/FAST/directory streams are played directly from their origin. User-supplied streams are played directly from the user's device to the user's provider; the backend never caches media for them (the relay above is a stateless pass-through used only as a browser-compatibility fallback).
 2. **No-DRM-bypass invariant.** The player module exposes only platform-licensed DRM. There is no pluggable "clearkey from URL" for encrypted third-party streams.
 3. **Provenance flag** on every source (`official | fast | directory | fta | user`) and a takedown path: directory/catalog entries can be disabled globally by a moderator flag (`status = blocked`) if a rights holder objects.
 4. **Terms-of-use gate** on user-supplied sources: the user attests ownership/entitlement when adding a playlist or Xtream account. Logged for audit.
@@ -100,7 +100,7 @@ Key principle: **clients play streams directly from the source**. The backend is
 **Web-delivery limits to know (inherent, not bugs):**
 - Browsers play a stream only over a matching security level: an HTTPS site cannot play `http://` streams (mixed content). The importer therefore prefers HTTPS streams.
 - hls.js (Chrome/Firefox/Edge) needs the stream origin to send CORS headers; many free streams do not. Safari/iOS and most TV browsers use native HLS, which does not need CORS. Streams that fail in one browser may work in another.
-- Fixing both would require relaying media through our server. That is deliberately **not** built: it costs bandwidth, and the platform's rule is that the backend never relays streams. An opt-in relay for official/FAST streams could be added later.
+- Both are handled by an **on-demand signed relay** (`GET /v1/proxy`, `services/api/src/hlsProxy.ts`): the player tries the origin directly first and only falls back to the relay when that fails or the stream is plain `http` on an HTTPS page. The relay rewrites HLS manifests so every segment/key link is HMAC-signed (6 h expiry, so it is not an open proxy), fetches through the SSRF-guarded opener, caps manifests (2 MB) and segments (25 MB / 25 s) and maps upstream failures to readable errors. It costs bandwidth, which is why it is a fallback.
 
 ### 4.2 Shared UI modules (all platforms)
 

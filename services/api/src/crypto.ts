@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync } from "node:crypto";
 
 /** Encrypts small secrets (e.g. Xtream credentials) at rest. Swap the key source for a KMS in production. */
 export interface SecretBox {
@@ -38,4 +38,9 @@ export function deriveSecretKey(raw: string): Buffer {
 
 export function secretBoxFromEnv(env = process.env): SecretBox {
   return aesSecretBox(deriveSecretKey(env.SECRET_KEY ?? ""));
+}
+
+/** Key for signing relayed stream URLs, derived from SECRET_KEY so every serverless instance agrees on it. */
+export function proxyKeyFromEnv(env = process.env): Buffer {
+  return createHmac("sha256", deriveSecretKey(env.SECRET_KEY ?? "")).update("receiver/proxy/v1").digest();
 }

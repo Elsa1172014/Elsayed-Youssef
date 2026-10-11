@@ -346,6 +346,38 @@ export class Store {
     return rows.map((r) => ({ id: r.id as string, name: r.name as string, logoUrl: opt(r.logo_url as string | null), category: opt(r.category as string | null), streamUrl: r.url as string }));
   }
 
+  /**
+   * Adds the best stream of every catalog channel matching the filter to the user's channels in ONE statement
+   * (a row-by-row loop took minutes for ~9.5k channels and hit the serverless time limit). Streams the user
+   * already has are skipped. Returns how many rows matched and how many were inserted.
+   */
+  async importCatalog(userId: string, opts: CatalogFilter & { limit: number }): Promise<{ added: number; skipped: number }> {
+    const { sql, vals } = this.catalogWhere(opts);
+    vals.push(opts.limit, userId, await this.nextSortOrder(userId));
+    const [lim, uid, base] = [vals.length - 2, vals.length - 1, vals.length];
+    const r = (await this.db.query<{ total: string; added: string }>(
+      `WITH cand AS (
+         SELECT c.id, c.name, c.logo_url, c.categories->>0 AS category, best.url
+           FROM (SELECT * FROM catalog_channels WHERE ${sql} ORDER BY name, id LIMIT $${lim}) c
+           JOIN LATERAL (SELECT url FROM catalog_streams s WHERE s.channel_id=c.id AND s.status<>'dead'
+                         ORDER BY (s.status='ok') DESC, (s.url LIKE 'https:%') DESC, s.latency_ms NULLS LAST, s.id LIMIT 1) best ON true
+       ), fresh AS (
+         SELECT *, row_number() OVER (PARTITION BY url ORDER BY name, id) AS dup FROM cand
+          WHERE NOT EXISTS (SELECT 1 FROM user_channels u WHERE u.user_id=$${uid} AND u.stream_url=cand.url)
+       ), numbered AS (
+         SELECT *, row_number() OVER (ORDER BY name, id) AS rn FROM fresh WHERE dup=1
+       ), ins AS (
+         INSERT INTO user_channels (id,user_id,name,logo_url,group_name,stream_url,sort_order,hidden)
+         SELECT gen_random_uuid()::text, $${uid}, name, logo_url, category, url, $${base}::int + rn::int - 1, false FROM numbered
+         RETURNING 1
+       )
+       SELECT (SELECT count(*) FROM cand) AS total, (SELECT count(*) FROM ins) AS added`, vals,
+    )).rows[0];
+    const total = Number(r?.total ?? 0);
+    const added = Number(r?.added ?? 0);
+    return { added, skipped: total - added };
+  }
+
   async getCatalogChannel(id: string) {
     const rows = (await this.db.query("SELECT * FROM catalog_channels WHERE id=$1", [id])).rows;
     return (await this.attachStreams(rows))[0];
