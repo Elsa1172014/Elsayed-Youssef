@@ -288,6 +288,12 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     return store.listChannels(uid, { limit: Math.min(limit, 2000), offset: Math.max(Number(q.offset) || 0, 0) });
   });
 
+  /** A named, URL-less source used as a Live group for channels the user adds by hand or from the catalog. Reused by name. */
+  const groupSource = async (uid: string, name: string) => {
+    const existing = (await store.listSources(uid)).find((x) => x.type === "m3u_file" && !x.url && x.name === name);
+    return (existing ?? (await store.addSource({ userId: uid, type: "m3u_file", name, enabled: true, ownershipAttestedAt: now().toISOString() }))).id;
+  };
+
   app.post("/v1/me/channels", async (req, reply) => {
     const b = body(req);
     const name = str(b.name, 200);
@@ -299,8 +305,9 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
       return bad(reply, (e as Error).message);
     }
     const uid = uidOf(req);
+    const groupName = str(b.groupName, 120);
     const row = await store.addChannel({
-      userId: uid, name, streamUrl, logoUrl: str(b.logoUrl, 1000), group: str(b.group, 120),
+      userId: uid, sourceId: groupName ? await groupSource(uid, groupName) : undefined, name, streamUrl, logoUrl: str(b.logoUrl, 1000), group: str(b.group, 120),
       epgChannelId: str(b.epgChannelId, 200), sortOrder: await store.nextSortOrder(uid), hidden: false,
     });
     return reply.code(201).send(row);
@@ -479,11 +486,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     const uid = uidOf(req);
     // Channels added from the catalog land in a named group (e.g. "iptv-org · Arabic · sports") so they show up as their own chip in Live.
     const name = str(b.name, 120);
-    let sourceId: string | undefined;
-    if (name) {
-      const existing = (await store.listSources(uid)).find((x) => x.type === "m3u_file" && !x.url && x.name === name);
-      sourceId = (existing ?? (await store.addSource({ userId: uid, type: "m3u_file", name, enabled: true, ownershipAttestedAt: now().toISOString() }))).id;
-    }
+    const sourceId = name ? await groupSource(uid, name) : undefined;
     const result = await store.importCatalog(uid, { ...f, limit, sourceId });
     if (sourceId && result.added === 0 && !(await store.countChannelsOfSource(uid, sourceId))) await store.deleteSource(uid, sourceId);
     return reply.code(201).send({ ...result, sourceId });

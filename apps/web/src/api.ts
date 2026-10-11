@@ -138,7 +138,7 @@ export const api = {
       if (page.length < 2000) return all;
     }
   },
-  addChannel: (c: { name: string; streamUrl: string; group?: string }) => call<Channel>("/v1/me/channels", json("POST", c)),
+  addChannel: (c: { name: string; streamUrl: string; group?: string; groupName?: string }) => call<Channel>("/v1/me/channels", json("POST", c)),
   editChannel: (id: string, patch: Partial<Channel>) => call<Channel>(`/v1/me/channels/${id}`, json("PATCH", patch)),
   deleteChannel: (id: string) => call<void>(`/v1/me/channels/${id}`, json("DELETE")),
   /** `url` is the stream's own address; `proxy` is a signed same-origin relay for streams browsers cannot reach directly. */

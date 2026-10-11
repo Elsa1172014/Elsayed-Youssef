@@ -164,6 +164,21 @@ describe("catalog import as a named group", () => {
   });
 });
 
+describe("single HLS stream", () => {
+  it("adds one .m3u8 channel into a named group and rejects private addresses", async () => {
+    const { app } = await makeApp();
+    const add = (payload: object) => app.inject({ method: "POST", url: "/v1/me/channels", headers: alice, payload });
+    const ok = await add({ name: "My Cam", streamUrl: "https://cdn.example.com/live/cam.m3u8", groupName: "My streams" });
+    expect(ok.statusCode).toBe(201);
+    const again = await add({ name: "Cam 2", streamUrl: "https://cdn.example.com/live/cam2.m3u8", groupName: "My streams" });
+    expect(again.json().sourceId).toBe(ok.json().sourceId);
+    const sources = (await app.inject({ url: "/v1/me/sources", headers: alice })).json();
+    expect(sources.map((x: { name: string }) => x.name)).toEqual(["My streams"]);
+    expect((await add({ name: "Local", streamUrl: "http://127.0.0.1/x.m3u8" })).statusCode).toBe(400);
+    expect((await add({ name: "Bad", streamUrl: "not a url" })).statusCode).toBe(400);
+  });
+});
+
 describe("catalog M3U download", () => {
   it("exports the filtered catalog as an M3U with one live stream per channel", async () => {
     const { app, db } = await makeApp();

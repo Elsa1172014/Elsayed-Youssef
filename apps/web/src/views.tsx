@@ -132,6 +132,7 @@ export function ManageView({
   const [form, setForm] = useState({ name: "", type: "m3u_url" as Source["type"], url: "", username: "", password: "" });
   const [chName, setChName] = useState("");
   const [chUrl, setChUrl] = useState("");
+  const [chGroup, setChGroup] = useState("");
   const [note, setNote] = useState("");
   const [filter, setFilter] = useState("");
   const load = () => api.sources().then(setSources).catch(() => setSources([]));
@@ -206,12 +207,16 @@ export function ManageView({
       <h3>Account</h3>
       <AccountPanel s={s} run={run} onDeleted={onAccountDeleted} />
 
-      <h3>Channels</h3>
-      <form onSubmit={(e) => { e.preventDefault(); void act(() => api.addChannel({ name: chName, streamUrl: chUrl })).then(() => { setChName(""); setChUrl(""); }); }}>
+      <h3>{s.directStream}</h3>
+      <p className="hint">{s.directStreamHint}</p>
+      <form onSubmit={(e) => { e.preventDefault(); void act(() => api.addChannel({ name: chName.trim(), streamUrl: chUrl.trim(), groupName: chGroup.trim() || s.myStreams })).then(() => { setChName(""); setChUrl(""); setChGroup(""); }); }}>
         <input placeholder={s.name} value={chName} onChange={(e) => setChName(e.target.value)} required />
-        <input placeholder="https://…m3u8" value={chUrl} onChange={(e) => setChUrl(e.target.value)} required />
+        <input type="url" dir="ltr" placeholder="https://example.com/live/stream.m3u8" value={chUrl} onChange={(e) => setChUrl(e.target.value)} required />
+        <input placeholder={`${s.groupOptional} (${s.myStreams})`} value={chGroup} onChange={(e) => setChGroup(e.target.value)} />
         <button>{s.add}</button>
       </form>
+
+      <h3>Channels</h3>
       <input placeholder={s.search} aria-label={s.search} value={filter} autoComplete="off" onChange={(e) => setFilter(e.target.value)} />
       <p className="hint">{channels.length.toLocaleString()}</p>
       <ul>
