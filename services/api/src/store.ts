@@ -262,6 +262,22 @@ export class Store {
     const r = (await this.db.query("SELECT value, updated_at FROM sync_state WHERE key=$1", [key])).rows[0];
     return r ? { value: r.value as string, updatedAt: iso(r.updated_at)! } : undefined;
   }
+  /** Seconds since `key` was last written, measured by the database clock; undefined if never. */
+  async syncAgeSeconds(key: string): Promise<number | undefined> {
+    const r = (await this.db.query<{ age: number }>("SELECT EXTRACT(EPOCH FROM now() - updated_at)::float8 AS age FROM sync_state WHERE key=$1", [key])).rows[0];
+    return r ? Number(r.age) : undefined;
+  }
+  /** Cross-instance mutex: true if the lock was free or older than ttlSeconds (a crashed holder). */
+  async tryLock(key: string, ttlSeconds: number): Promise<boolean> {
+    const r = await this.db.query(
+      "INSERT INTO sync_state (key,value,updated_at) VALUES ($1,'locked',now()) ON CONFLICT (key) DO UPDATE SET value='locked', updated_at=now() WHERE sync_state.updated_at < now() - make_interval(secs => $2::float8) RETURNING key",
+      [key, ttlSeconds],
+    );
+    return r.rows.length > 0;
+  }
+  async unlock(key: string) {
+    await this.db.query("DELETE FROM sync_state WHERE key=$1", [key]);
+  }
   async setSyncState(key: string, value: string) {
     await this.db.query("INSERT INTO sync_state (key,value,updated_at) VALUES ($1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()", [key, value]);
   }

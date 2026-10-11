@@ -138,3 +138,61 @@ describe("full catalog lifecycle", () => {
     expect((await app.inject({ url: "/v1/me/channels", headers: alice })).json()[0].streamUrl).toBe("https://secure.example/a.m3u8");
   });
 });
+
+describe("in-app catalog sync", () => {
+  const routes = { ...BL, [`${API}/channels.json`]: channels, [`${API}/streams.json`]: streams };
+
+  it("requires a signed-in user, fills an empty catalog, then enforces a cooldown", async () => {
+    const { app } = await makeApp(routes);
+    expect((await app.inject({ method: "POST", url: "/v1/catalog/sync" })).statusCode).toBe(401);
+    expect((await app.inject({ url: "/v1/catalog/sync", headers: alice })).json()).toMatchObject({ running: false, channels: 0, lastSync: null });
+
+    const first = await app.inject({ method: "POST", url: "/v1/catalog/sync", headers: alice });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ channels: 2, streams: 2 });
+    const status = (await app.inject({ url: "/v1/catalog/sync", headers: bob })).json();
+    expect(status).toMatchObject({ running: false, channels: 2, lastSync: { channels: 2 } });
+    expect((await app.inject({ url: "/v1/catalog?q=jaz", headers: bob })).json()).toHaveLength(1);
+
+    const again = await app.inject({ method: "POST", url: "/v1/catalog/sync", headers: bob });
+    expect(again.statusCode).toBe(429);
+  });
+
+  it("refuses to run twice at once and releases the lock after a failure", async () => {
+    const { app, store } = await makeApp({ ...BL, [`${API}/channels.json`]: 500, [`${API}/streams.json`]: streams });
+    expect(await store.tryLock("iptv-org-lock", 120)).toBe(true);
+    expect((await app.inject({ method: "POST", url: "/v1/catalog/sync", headers: alice })).statusCode).toBe(409);
+    expect((await app.inject({ url: "/v1/catalog/sync", headers: alice })).json().running).toBe(true);
+    await store.unlock("iptv-org-lock");
+
+    const failed = await app.inject({ method: "POST", url: "/v1/catalog/sync", headers: alice });
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json().error).toContain("channels.json returned HTTP 500");
+    expect(await store.tryLock("iptv-org-lock", 120)).toBe(true); // lock was released
+  });
+
+  it("treats a stale lock (crashed function) as free", async () => {
+    const { store, db } = await makeApp(routes);
+    expect(await store.tryLock("iptv-org-lock", 120)).toBe(true);
+    expect(await store.tryLock("iptv-org-lock", 120)).toBe(false);
+    await db.query("UPDATE sync_state SET updated_at = now() - interval '5 minutes' WHERE key='iptv-org-lock'");
+    expect(await store.tryLock("iptv-org-lock", 120)).toBe(true);
+  });
+});
+
+describe("body-less requests", () => {
+  const json = { "content-type": "application/json" };
+  it("accept an empty body with a JSON content type (POST and DELETE) instead of 400 Bad Request", async () => {
+    const { app } = await makeApp({ ...BL, [`${API}/channels.json`]: channels, [`${API}/streams.json`]: streams });
+    expect((await app.inject({ method: "POST", url: "/v1/catalog/sync", headers: { ...alice, ...json } })).statusCode).toBe(200);
+    const added = await app.inject({ method: "POST", url: "/v1/catalog/A.qa/add", headers: { ...alice, ...json } });
+    expect(added.statusCode).toBe(201);
+    expect((await app.inject({ method: "DELETE", url: `/v1/me/channels/${added.json().id}`, headers: { ...alice, ...json } })).statusCode).toBe(204);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/logout", headers: { ...alice, ...json } })).statusCode).toBe(204);
+  });
+  it("still rejects malformed JSON with 400", async () => {
+    const { app } = await makeApp();
+    const bad = await app.inject({ method: "POST", url: "/v1/me/channels", headers: { ...alice, ...json }, payload: "{nope" });
+    expect(bad.statusCode).toBe(400);
+  });
+});

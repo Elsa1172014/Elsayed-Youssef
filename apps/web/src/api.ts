@@ -103,7 +103,8 @@ export const setBase = (b: string) => {
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(base + path, {
     ...init,
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...init.headers },
+    // Only declare JSON when there is a body: a body-less POST/DELETE with a JSON content type is rejected by some servers.
+    headers: { ...(init.body === undefined ? {} : { "content-type": "application/json" }), authorization: `Bearer ${token}`, ...init.headers },
   });
   if (res.status === 401 && token && !path.startsWith("/v1/auth/")) onUnauthorized();
   if (!res.ok) {
@@ -155,6 +156,8 @@ export const api = {
     return { items: (await res.json()) as CatalogEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
+  syncStatus: () => call<{ running: boolean; channels: number; lastSync: { at: string; channels: number; streams: number; premium: number } | null }>("/v1/catalog/sync"),
+  syncNow: () => call<{ channels: number; streams: number; premium: number }>("/v1/catalog/sync", json("POST")),
   premium: async (f: CatalogFilter, offset = 0) => {
     const qs = new URLSearchParams({ offset: String(offset), limit: "50" });
     for (const [k, v] of Object.entries(f)) if (v) qs.set(k, v);

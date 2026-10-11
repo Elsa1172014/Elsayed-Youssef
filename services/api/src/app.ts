@@ -1,3 +1,4 @@
+import { syncIptvOrg } from "./jobs/catalog";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   assertPublicHttpUrl, fillCredentials, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
@@ -26,6 +27,8 @@ interface Deps {
   model?: TextModel;
   secrets: SecretBox;
   fetcher: SafeFetch;
+  /** Base URL of the iptv-org API used by the in-app "Sync now" button (tests point it at a fake). */
+  catalogApi?: string;
   now?: () => Date;
 }
 
@@ -39,8 +42,13 @@ interface Creds {
   password: string;
 }
 
-export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedOrigins = [], trustProxy = false, model, now = () => new Date() }: Deps): FastifyInstance {
+export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedOrigins = [], trustProxy = false, model, catalogApi, now = () => new Date() }: Deps): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES, trustProxy });
+  // Browsers/clients often send `content-type: application/json` on body-less POST/DELETE; Fastify's default parser
+  // answers that with 400 "Bad Request". Treat an empty body as {} and keep the default parser (with its
+  // prototype-poisoning protection) for everything else.
+  const jsonParser = app.getDefaultJsonParser("error", "error");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => (body === "" ? done(null, {}) : jsonParser(req, body as string, done)));
   const loginLimiter = new AttemptLimiter(5, 15 * 60_000, () => now().getTime());
   const aiLimiter = new AttemptLimiter(60, 3600_000, () => now().getTime()); // per user per hour: bounds model cost
   const registerLimiter = new AttemptLimiter(10, 60 * 60_000, () => now().getTime());
@@ -393,6 +401,33 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedO
   });
 
   app.get("/v1/catalog/facets", async () => store.catalogFacets());
+
+  /** In-app catalog refresh for hosts without a worker (e.g. Vercel Hobby, where the cron has no manual "Run"). */
+  const SYNC_LOCK = "iptv-org-lock";
+  const SYNC_COOLDOWN_S = 600;
+  app.get("/v1/catalog/sync", async () => {
+    const last = await store.getSyncState("iptv-org");
+    return {
+      running: (await store.syncAgeSeconds(SYNC_LOCK)) !== undefined,
+      channels: await store.countActiveDirectory(),
+      lastSync: last ? { at: last.updatedAt, ...(JSON.parse(last.value) as object) } : null,
+    };
+  });
+  app.post("/v1/catalog/sync", async (_req, reply) => {
+    // A non-empty catalog is refreshed at most every 10 minutes, so open registration cannot be used to hammer iptv-org.
+    const age = await store.syncAgeSeconds("iptv-org");
+    if (age !== undefined && age < SYNC_COOLDOWN_S && (await store.countActiveDirectory()) > 0) {
+      return bad(reply, `Catalog was refreshed ${Math.round(age / 60)} min ago; try again later`, 429);
+    }
+    if (!(await store.tryLock(SYNC_LOCK, 120))) return bad(reply, "A sync is already running", 409);
+    try {
+      return await syncIptvOrg(store, fetcher, catalogApi);
+    } catch (e) {
+      return bad(reply, `Sync failed: ${(e as Error).message}`, 502);
+    } finally {
+      await store.unlock(SYNC_LOCK);
+    }
+  });
 
   /**
    * Adds every catalog channel matching the filter to the caller's channels (best stream each), skipping ones
