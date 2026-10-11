@@ -164,6 +164,41 @@ describe("catalog import as a named group", () => {
   });
 });
 
+describe(".m3u8 content detection", () => {
+  const LIST = "#EXTM3U\n#EXTINF:-1 group-title=\"News\",One\nhttps://p.example/1.m3u8\n#EXTINF:-1,Two\nhttps://p.example/2.m3u8\n";
+  const MASTER = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nlow/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nhigh/index.m3u8\n";
+  const MEDIA = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n#EXTINF:6.0,\nseg2.ts\n";
+  it("treats a .m3u8 channel list as a playlist and an HLS manifest as one channel", async () => {
+    const { app } = await makeApp({ "https://lists.example/all.m3u8": LIST, "https://live.example/master.m3u8": MASTER, "https://live.example/media.m3u8": MEDIA });
+    const add = async (name: string, url: string) => (await app.inject({ method: "POST", url: "/v1/me/sources", headers: alice, payload: { name, type: "m3u_url", url, ownershipAttested: true } })).json();
+    const sync = async (id: string) => (await app.inject({ method: "POST", url: `/v1/me/sources/${id}/sync`, headers: alice })).json();
+    expect(await sync((await add("List", "https://lists.example/all.m3u8")).id)).toEqual({ added: 2 });
+    expect(await sync((await add("Master", "https://live.example/master.m3u8")).id)).toEqual({ added: 1 });
+    expect(await sync((await add("Media", "https://live.example/media.m3u8")).id)).toEqual({ added: 1 });
+    const chans = (await app.inject({ url: "/v1/me/channels", headers: alice })).json() as { name: string; streamUrl: string }[];
+    expect(chans.find((c) => c.name === "Master")?.streamUrl).toBe("https://live.example/master.m3u8");
+    // an uploaded file that is a single-stream manifest is rejected with an explanation; a channel list imports fine
+    const up = (content: string) => app.inject({ method: "POST", url: "/v1/me/playlists/import", headers: alice, payload: { content, name: "f", ownershipAttested: true } });
+    expect((await up(MEDIA)).statusCode).toBe(400);
+    expect((await up(LIST)).json().imported).toBe(2);
+  });
+});
+
+describe("single HLS stream", () => {
+  it("adds one .m3u8 channel into a named group and rejects private addresses", async () => {
+    const { app } = await makeApp();
+    const add = (payload: object) => app.inject({ method: "POST", url: "/v1/me/channels", headers: alice, payload });
+    const ok = await add({ name: "My Cam", streamUrl: "https://cdn.example.com/live/cam.m3u8", groupName: "My streams" });
+    expect(ok.statusCode).toBe(201);
+    const again = await add({ name: "Cam 2", streamUrl: "https://cdn.example.com/live/cam2.m3u8", groupName: "My streams" });
+    expect(again.json().sourceId).toBe(ok.json().sourceId);
+    const sources = (await app.inject({ url: "/v1/me/sources", headers: alice })).json();
+    expect(sources.map((x: { name: string }) => x.name)).toEqual(["My streams"]);
+    expect((await add({ name: "Local", streamUrl: "http://127.0.0.1/x.m3u8" })).statusCode).toBe(400);
+    expect((await add({ name: "Bad", streamUrl: "not a url" })).statusCode).toBe(400);
+  });
+});
+
 describe("catalog M3U download", () => {
   it("exports the filtered catalog as an M3U with one live stream per channel", async () => {
     const { app, db } = await makeApp();

@@ -42,6 +42,16 @@ function isAllowedUrl(raw: string): boolean {
 }
 
 /**
+ * `.m3u8` is both the UTF-8 form of a channel list (#EXTINF + one URL per channel) and the format of a single HLS
+ * stream's manifest. A manifest carries HLS-only tags or lists media segments; a channel list does not.
+ */
+export function looksLikeHlsManifest(text: string): boolean {
+  if (/^#EXT-X-(STREAM-INF|MEDIA-SEQUENCE|TARGETDURATION|PLAYLIST-TYPE|I-FRAME-STREAM-INF|MEDIA:)/m.test(text)) return true;
+  const urls = text.split(/\r\n|\n|\r/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  return urls.length > 0 && urls.every((u) => /\.(ts|m4s|aac|mp4|cmfv|cmfa)(\?|$)/i.test(u));
+}
+
+/**
  * Tolerant M3U/M3U8 channel-playlist parser. Never throws on malformed input;
  * problems are reported in `warnings`. Only an allow-list of URL schemes is
  * accepted so entries cannot smuggle in file:, javascript: or data: URLs.

@@ -2,7 +2,7 @@ import { syncIptvOrg } from "./jobs/catalog";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   assertPublicHttpUrl, fillCredentials, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
-  matchOwnChannels, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
+  looksLikeHlsManifest, matchOwnChannels, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
   xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
 import { clip, LANGS, plainSummary, SUMMARY_SYSTEM, TRANSLATE_SYSTEM, type Lang, type TextModel } from "./ai";
@@ -246,7 +246,10 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
       } else if (src.type === "m3u_url" && src.url) {
         const res = await fetcher(src.url, { signal: AbortSignal.timeout(25_000) });
         if (!res.ok) return bad(reply, `Source returned HTTP ${res.status}`, 502);
-        for (const e of parseM3U(await res.text()).entries) {
+        const text = await res.text();
+        // A .m3u8 that is an HLS manifest is one live stream, not a channel list: the source itself becomes the channel.
+        if (looksLikeHlsManifest(text)) await addNew({ name: src.name, streamUrl: src.url });
+        else for (const e of parseM3U(text).entries) {
           await addNew({ name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo, group: e.groupTitle, epgChannelId: e.tvgId });
         }
       } else if (src.type === "xmltv" && src.url) {
@@ -288,6 +291,12 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     return store.listChannels(uid, { limit: Math.min(limit, 2000), offset: Math.max(Number(q.offset) || 0, 0) });
   });
 
+  /** A named, URL-less source used as a Live group for channels the user adds by hand or from the catalog. Reused by name. */
+  const groupSource = async (uid: string, name: string) => {
+    const existing = (await store.listSources(uid)).find((x) => x.type === "m3u_file" && !x.url && x.name === name);
+    return (existing ?? (await store.addSource({ userId: uid, type: "m3u_file", name, enabled: true, ownershipAttestedAt: now().toISOString() }))).id;
+  };
+
   app.post("/v1/me/channels", async (req, reply) => {
     const b = body(req);
     const name = str(b.name, 200);
@@ -299,8 +308,9 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
       return bad(reply, (e as Error).message);
     }
     const uid = uidOf(req);
+    const groupName = str(b.groupName, 120);
     const row = await store.addChannel({
-      userId: uid, name, streamUrl, logoUrl: str(b.logoUrl, 1000), group: str(b.group, 120),
+      userId: uid, sourceId: groupName ? await groupSource(uid, groupName) : undefined, name, streamUrl, logoUrl: str(b.logoUrl, 1000), group: str(b.group, 120),
       epgChannelId: str(b.epgChannelId, 200), sortOrder: await store.nextSortOrder(uid), hidden: false,
     });
     return reply.code(201).send(row);
@@ -365,6 +375,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     if (!content) return bad(reply, "content (M3U text) is required");
     if (b.ownershipAttested !== true) return bad(reply, "You must attest that you own or are entitled to use this playlist");
     const uid = uidOf(req);
+    if (looksLikeHlsManifest(content)) return bad(reply, "This file is the manifest of a single HLS stream (its segment paths are relative), not a channel list. Add its URL under \"Add a direct live stream\" or as an M3U URL.");
     const parsed = parseM3U(content);
     const source = await store.addSource({ userId: uid, type: "m3u_file", name: str(b.name, 120) ?? "Imported playlist", enabled: true, ownershipAttestedAt: now().toISOString() });
     let order = await store.nextSortOrder(uid);
@@ -479,11 +490,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     const uid = uidOf(req);
     // Channels added from the catalog land in a named group (e.g. "iptv-org · Arabic · sports") so they show up as their own chip in Live.
     const name = str(b.name, 120);
-    let sourceId: string | undefined;
-    if (name) {
-      const existing = (await store.listSources(uid)).find((x) => x.type === "m3u_file" && !x.url && x.name === name);
-      sourceId = (existing ?? (await store.addSource({ userId: uid, type: "m3u_file", name, enabled: true, ownershipAttestedAt: now().toISOString() }))).id;
-    }
+    const sourceId = name ? await groupSource(uid, name) : undefined;
     const result = await store.importCatalog(uid, { ...f, limit, sourceId });
     if (sourceId && result.added === 0 && !(await store.countChannelsOfSource(uid, sourceId))) await store.deleteSource(uid, sourceId);
     return reply.code(201).send({ ...result, sourceId });
