@@ -44,6 +44,11 @@ interface Creds {
 
 export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedOrigins = [], trustProxy = false, model, catalogApi, now = () => new Date() }: Deps): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES, trustProxy });
+  // Browsers/clients often send `content-type: application/json` on body-less POST/DELETE; Fastify's default parser
+  // answers that with 400 "Bad Request". Treat an empty body as {} and keep the default parser (with its
+  // prototype-poisoning protection) for everything else.
+  const jsonParser = app.getDefaultJsonParser("error", "error");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => (body === "" ? done(null, {}) : jsonParser(req, body as string, done)));
   const loginLimiter = new AttemptLimiter(5, 15 * 60_000, () => now().getTime());
   const aiLimiter = new AttemptLimiter(60, 3600_000, () => now().getTime()); // per user per hour: bounds model cost
   const registerLimiter = new AttemptLimiter(10, 60 * 60_000, () => now().getTime());

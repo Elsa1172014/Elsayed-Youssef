@@ -179,3 +179,20 @@ describe("in-app catalog sync", () => {
     expect(await store.tryLock("iptv-org-lock", 120)).toBe(true);
   });
 });
+
+describe("body-less requests", () => {
+  const json = { "content-type": "application/json" };
+  it("accept an empty body with a JSON content type (POST and DELETE) instead of 400 Bad Request", async () => {
+    const { app } = await makeApp({ ...BL, [`${API}/channels.json`]: channels, [`${API}/streams.json`]: streams });
+    expect((await app.inject({ method: "POST", url: "/v1/catalog/sync", headers: { ...alice, ...json } })).statusCode).toBe(200);
+    const added = await app.inject({ method: "POST", url: "/v1/catalog/A.qa/add", headers: { ...alice, ...json } });
+    expect(added.statusCode).toBe(201);
+    expect((await app.inject({ method: "DELETE", url: `/v1/me/channels/${added.json().id}`, headers: { ...alice, ...json } })).statusCode).toBe(204);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/logout", headers: { ...alice, ...json } })).statusCode).toBe(204);
+  });
+  it("still rejects malformed JSON with 400", async () => {
+    const { app } = await makeApp();
+    const bad = await app.inject({ method: "POST", url: "/v1/me/channels", headers: { ...alice, ...json }, payload: "{nope" });
+    expect(bad.statusCode).toBe(400);
+  });
+});
