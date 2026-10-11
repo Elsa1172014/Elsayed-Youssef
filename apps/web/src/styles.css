@@ -25,3 +25,6 @@ li.cat { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0
 .guide-row { display: grid; grid-template-columns: 160px repeat(12, minmax(90px, 1fr)); border-bottom: 1px solid #8883; }
 .guide-row > span, .guide-row > strong { padding: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .guide-row.head { font-weight: 600; position: sticky; top: 0; background: Canvas; }
+.login form { display: grid; gap: 12px; }
+button.link { background: none; border: 0; color: #4c8dff; cursor: pointer; text-align: start; padding: 0; }
+.account { display: grid; gap: 8px; max-width: 360px; }

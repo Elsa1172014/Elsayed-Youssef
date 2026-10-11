@@ -55,8 +55,8 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
 }
 
 export function ManageView({
-  s, channels, suggestions, refresh, run,
-}: { s: Strings; channels: Channel[]; suggestions: Suggestion[]; refresh: () => Promise<unknown>; run: Run }) {
+  s, channels, suggestions, refresh, run, onAccountDeleted,
+}: { s: Strings; channels: Channel[]; suggestions: Suggestion[]; refresh: () => Promise<unknown>; run: Run; onAccountDeleted: () => void }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [attested, setAttested] = useState(false);
   const [form, setForm] = useState({ name: "", type: "m3u_url" as Source["type"], url: "", username: "", password: "" });
@@ -117,6 +117,9 @@ export function ManageView({
         </div>
       )}
 
+      <h3>Account</h3>
+      <AccountPanel s={s} run={run} onDeleted={onAccountDeleted} />
+
       <h3>Channels</h3>
       <form onSubmit={(e) => { e.preventDefault(); void act(() => api.addChannel({ name: chName, streamUrl: chUrl })).then(() => { setChName(""); setChUrl(""); }); }}>
         <input placeholder={s.name} value={chName} onChange={(e) => setChName(e.target.value)} required />
@@ -132,6 +135,19 @@ export function ManageView({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function AccountPanel({ s, run, onDeleted }: { s: Strings; run: Run; onDeleted: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  return (
+    <div className="account">
+      <input type="password" placeholder={s.confirmPassword} value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+      <input type="password" placeholder={s.newPassword} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+      <button disabled={!current || next.length < 10} onClick={() => run(async () => { await api.changePassword(current, next); setCurrent(""); setNext(""); })}>{s.changePassword}</button>
+      <button disabled={!current} onClick={() => run(async () => { await api.deleteAccount(current); onDeleted(); })}>{s.deleteAccount}</button>
     </div>
   );
 }

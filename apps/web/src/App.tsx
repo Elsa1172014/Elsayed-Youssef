@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, setBase, setToken, type Channel, type NowNext, type Suggestion } from "./api";
+import { api, persistToken, setBase, setOnUnauthorized, setToken, storedToken, type Channel, type NowNext, type Suggestion } from "./api";
 import { t, type Lang } from "./i18n";
 import { Player } from "./Player";
 import { CatalogView, GuideView, ManageView } from "./views";
+import { SignIn } from "./SignIn";
 
 type Tab = "live" | "guide" | "catalog" | "manage";
 
@@ -10,8 +11,12 @@ type Tab = "live" | "guide" | "catalog" | "manage";
 setBase((import.meta.env.VITE_API_BASE as string | undefined) ?? "");
 
 export function App() {
-  const [user, setUser] = useState("");
-  const [signedIn, setSignedIn] = useState(false);
+  const [signedIn, setSignedIn] = useState(() => {
+    const t = storedToken();
+    setToken(t);
+    return !!t;
+  });
+  const [username, setUsername] = useState<string>("");
   const [lang, setLang] = useState<Lang>("en");
   const [tab, setTab] = useState<Tab>("live");
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -33,6 +38,15 @@ export function App() {
     }
   }, []);
 
+  const signOut = useCallback(() => {
+    setToken("");
+    persistToken("");
+    setSignedIn(false);
+    setChannels([]);
+    setSelected(null);
+  }, []);
+  useEffect(() => setOnUnauthorized(signOut), [signOut]);
+
   const refresh = useCallback(
     () => run(async () => {
       const [c, nn, r, sg] = await Promise.all([api.channels(), api.nowNext(), api.recommendations(), api.suggestions()]);
@@ -40,23 +54,18 @@ export function App() {
     }),
     [run],
   );
-  useEffect(() => { if (signedIn) void refresh(); }, [signedIn, refresh]);
+  useEffect(() => {
+    if (!signedIn) return;
+    void refresh();
+    void api.me().then((m) => setUsername(m.username)).catch(() => undefined);
+  }, [signedIn, refresh]);
 
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     return hits ? hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c) : list;
   }, [channels, hits]);
 
-  if (!signedIn) {
-    return (
-      <main className="login">
-        <h1>Smart Receiver</h1>
-        <p>Development sign-in (replaced by real accounts before release).</p>
-        <input placeholder="user name" value={user} onChange={(e) => setUser(e.target.value.replace(/[^A-Za-z0-9_-]/g, ""))} />
-        <button disabled={!user} onClick={() => { setToken(`dev:${user}`); setSignedIn(true); }}>Continue</button>
-      </main>
-    );
-  }
+  if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
   const tabs: Tab[] = ["live", "guide", "catalog", "manage"];
   return (
@@ -75,6 +84,7 @@ export function App() {
           }}
         />
         <button onClick={() => setLang(lang === "ar" ? "en" : "ar")}>{lang === "ar" ? "English" : "العربية"}</button>
+        <button onClick={() => { void api.logout().catch(() => undefined).finally(signOut); }} title={username}>{s.signOut}{username ? ` (${username})` : ""}</button>
       </header>
       {msg && <p className="error" role="alert">{msg}</p>}
       {tab === "live" && (
@@ -106,7 +116,7 @@ export function App() {
       <div className="page">
         {tab === "guide" && <GuideView channels={channels.filter((c) => !c.hidden)} />}
         {tab === "catalog" && <CatalogView s={s} run={run} refresh={refresh} />}
-        {tab === "manage" && <ManageView s={s} channels={channels} suggestions={suggestions} refresh={refresh} run={run} />}
+        {tab === "manage" && <ManageView s={s} channels={channels} suggestions={suggestions} refresh={refresh} run={run} onAccountDeleted={signOut} />}
       </div>
     </div>
   );

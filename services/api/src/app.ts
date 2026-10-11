@@ -4,7 +4,8 @@ import {
   parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
   xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
-import type { Authenticator } from "./auth";
+import { AuthError, bearerToken, type AuthService, type Authenticator } from "./auth";
+import { AttemptLimiter } from "./rateLimit";
 import type { SecretBox } from "./crypto";
 import type { SafeFetch } from "./safeFetch";
 import type { SourceType, Store, UserChannel, UserSource } from "./store";
@@ -15,7 +16,11 @@ const embedder = hashingEmbedder();
 
 interface Deps {
   store: Store;
+  auth: AuthService;
   authenticate: Authenticator;
+  /** Comma-separated browser origins allowed to call the API cross-origin (e.g. packaged TV apps). */
+  allowedOrigins?: string[];
+  trustProxy?: boolean;
   secrets: SecretBox;
   fetcher: SafeFetch;
   now?: () => Date;
@@ -31,19 +36,96 @@ interface Creds {
   password: string;
 }
 
-export function buildApp({ store, authenticate, secrets, fetcher, now = () => new Date() }: Deps): FastifyInstance {
-  const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES });
+export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedOrigins = [], trustProxy = false, now = () => new Date() }: Deps): FastifyInstance {
+  const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES, trustProxy });
+  const loginLimiter = new AttemptLimiter(5, 15 * 60_000, () => now().getTime());
+  const registerLimiter = new AttemptLimiter(10, 60 * 60_000, () => now().getTime());
+
+  app.addHook("onRequest", async (req, reply) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      reply.header("access-control-allow-origin", origin).header("vary", "origin")
+        .header("access-control-allow-headers", "authorization, content-type")
+        .header("access-control-allow-methods", "GET, POST, PATCH, DELETE, OPTIONS");
+    }
+    if (req.method === "OPTIONS") return reply.code(204).send();
+  });
+  app.addHook("onSend", async (_req, reply) => {
+    reply.header("cache-control", "no-store").header("x-content-type-options", "nosniff");
+  });
 
   app.get("/healthz", async () => ({ ok: true }));
 
+  const PUBLIC = new Set(["/healthz", "/v1/auth/register", "/v1/auth/login"]);
   app.addHook("preHandler", async (req, reply) => {
-    if (req.url === "/healthz") return;
-    const uid = authenticate(req);
+    if (PUBLIC.has(req.url.split("?")[0]!)) return;
+    const uid = await authenticate(req);
     if (!uid) return bad(reply, "Unauthorized", 401);
     (req as FastifyRequest & { uid: string }).uid = uid;
   });
   const uidOf = (req: FastifyRequest) => (req as FastifyRequest & { uid: string }).uid;
   const body = (req: FastifyRequest) => (req.body ?? {}) as Record<string, unknown>;
+
+  // ---- Accounts (username + password) ----
+  const authFail = (reply: FastifyReply, e: unknown) => {
+    if (e instanceof AuthError) return bad(reply, e.message, e.status);
+    throw e;
+  };
+
+  app.post("/v1/auth/register", async (req, reply) => {
+    const wait = registerLimiter.blockedFor(req.ip);
+    if (wait) return reply.header("retry-after", wait).code(429).send({ error: "Too many sign-up attempts, try again later" });
+    registerLimiter.fail(req.ip); // every registration attempt counts, successful or not
+    try {
+      const b = body(req);
+      return reply.code(201).send(await auth.register(b.username, b.password));
+    } catch (e) {
+      return authFail(reply, e);
+    }
+  });
+
+  app.post("/v1/auth/login", async (req, reply) => {
+    const b = body(req);
+    const name = typeof b.username === "string" ? b.username.toLowerCase().slice(0, 64) : "";
+    const keys = [`u:${name}`, `ip:${req.ip}`];
+    const wait = Math.max(...keys.map((k) => loginLimiter.blockedFor(k)));
+    if (wait) return reply.header("retry-after", wait).code(429).send({ error: "Too many failed attempts, try again later" });
+    try {
+      const r = await auth.login(b.username, b.password);
+      loginLimiter.reset(keys[0]!);
+      return r;
+    } catch (e) {
+      if (e instanceof AuthError && e.status === 401) keys.forEach((k) => loginLimiter.fail(k));
+      return authFail(reply, e);
+    }
+  });
+
+  app.post("/v1/auth/logout", async (req, reply) => {
+    await auth.logout(bearerToken(req)!);
+    return reply.code(204).send();
+  });
+
+  app.get("/v1/me", async (req, reply) => (await auth.me(uidOf(req))) ?? bad(reply, "Not found", 404));
+
+  app.post("/v1/auth/password", async (req, reply) => {
+    const b = body(req);
+    try {
+      await auth.changePassword(uidOf(req), b.currentPassword, b.newPassword, bearerToken(req)!);
+      return reply.code(204).send();
+    } catch (e) {
+      return authFail(reply, e);
+    }
+  });
+
+  // Deletes the account and all of its data. Requires the password.
+  app.delete("/v1/me", async (req, reply) => {
+    try {
+      await auth.deleteAccount(uidOf(req), body(req).password);
+      return reply.code(204).send();
+    } catch (e) {
+      return authFail(reply, e);
+    }
+  });
 
   const credsOf = async (uid: string, src: UserSource): Promise<Creds | undefined> => {
     const sealed = await store.getSourceSecret(uid, src.id);

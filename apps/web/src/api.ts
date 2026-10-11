@@ -40,8 +40,32 @@ export interface CatalogEntry {
 
 let token = "";
 let base = "";
+let onUnauthorized: () => void = () => undefined;
 export const setToken = (t: string) => {
   token = t;
+};
+/** Called when the server rejects the session (expired/revoked) so the UI can return to sign-in. */
+export const setOnUnauthorized = (fn: () => void) => {
+  onUnauthorized = fn;
+};
+
+// The session token lives in localStorage so TV and web sessions survive restarts. Any XSS could read it,
+// so the app avoids injecting HTML and the API uses short-lived-by-revocation sessions (logout / password change revoke them).
+const KEY = "receiver.token";
+export const storedToken = (): string => {
+  try {
+    return localStorage.getItem(KEY) ?? "";
+  } catch {
+    return "";
+  }
+};
+export const persistToken = (t: string) => {
+  try {
+    if (t) localStorage.setItem(KEY, t);
+    else localStorage.removeItem(KEY);
+  } catch {
+    /* storage unavailable (private mode / TV sandbox): session lasts until reload */
+  }
 };
 /** API origin for packaged TV builds (Tizen/webOS), where relative URLs do not reach the backend. */
 export const setBase = (b: string) => {
@@ -53,6 +77,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...init.headers },
   });
+  if (res.status === 401 && token && !path.startsWith("/v1/auth/")) onUnauthorized();
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `Request failed (${res.status})`);
@@ -62,6 +87,12 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 const json = (method: string, body?: unknown): RequestInit => ({ method, body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const api = {
+  register: (username: string, password: string) => call<{ token: string }>("/v1/auth/register", json("POST", { username, password })),
+  login: (username: string, password: string) => call<{ token: string }>("/v1/auth/login", json("POST", { username, password })),
+  logout: () => call<void>("/v1/auth/logout", json("POST")),
+  me: () => call<{ id: string; username: string }>("/v1/me"),
+  changePassword: (currentPassword: string, newPassword: string) => call<void>("/v1/auth/password", json("POST", { currentPassword, newPassword })),
+  deleteAccount: (password: string) => call<void>("/v1/me", json("DELETE", { password })),
   channels: () => call<Channel[]>("/v1/me/channels"),
   addChannel: (c: { name: string; streamUrl: string; group?: string }) => call<Channel>("/v1/me/channels", json("POST", c)),
   editChannel: (id: string, patch: Partial<Channel>) => call<Channel>(`/v1/me/channels/${id}`, json("PATCH", patch)),

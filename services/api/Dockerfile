@@ -7,6 +7,5 @@ WORKDIR /app/services/api
 RUN npm ci
 ENV NODE_ENV=production
 EXPOSE 3000
-# NOTE: production start is blocked until real auth replaces devAuthenticator
-# (see docs/DEPLOYMENT.md); the server refuses to boot with the dev authenticator.
+# Required env: DATABASE_URL, SECRET_KEY (see .env.example). Serve behind HTTPS only.
 CMD ["npx", "tsx", "src/server.ts"]

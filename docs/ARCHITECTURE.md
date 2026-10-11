@@ -133,7 +133,7 @@ Start as a **modular monolith** with clear module boundaries; split when load de
 
 | Module | Responsibility |
 |---|---|
-| **Auth & Profiles** | Sign-up/in (email+password, Apple/Google, device-code login for TVs), OIDC (Keycloak or Auth0/Clerk), short-lived JWT + refresh tokens, multi-profile per account, device registry |
+| **Auth & Profiles** | **Implemented:** username + password accounts, scrypt hashing, opaque revocable session tokens, rate limiting, password change, account deletion. **Later options:** device-code login for TVs, OIDC/social sign-in, multi-profile per account, device registry |
 | **Channel & Source Service** | Canonical channel catalog + per-user overlays. Sources (official, FAST, directory, FTA, user). CRUD with ownership enforcement. |
 | **Playlist Service** | Parse/validate M3U/M3U8/Xtream; user playlists, folders, ordering; import/export; share *metadata-only* lists between a user's own profiles |
 | **EPG Service** | Aggregate XMLTV and provider guides, normalize, map to channels, serve now/next and windowed grids |
