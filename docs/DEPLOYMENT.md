@@ -123,7 +123,7 @@
 1. في Vercel: **Add New → Project** ثم اختر مستودع `Elsayed-Youssef` (Import).
 2. في شاشة الإعداد اضغط **Root Directory → Edit** واختر `deploy/vercel`. تأكد أن خيار *Include source files outside of the Root Directory* مفعّل (الافتراضي). اترك Framework = Other وأوامر البناء كما هي (مأخوذة من `vercel.json`).
 3. افتح **Environment Variables** وأضف قبل أول Deploy:
-   - `SECRET_KEY`: ناتج الأمر `openssl rand -base64 32` (يشفّر بيانات اشتراك Xtream؛ إن فُقد لا تُفكّ البيانات القديمة).
+   - `SECRET_KEY`: أي نص طويل عشوائي (يُشتق منه مفتاح 32 بايت تلقائياً)، أو ناتج `openssl rand -base64 32` الذي يُستخدم كما هو. يشفّر بيانات اشتراك Xtream؛ إن غيّرته أو فُقد لا تُفكّ البيانات المشفّرة سابقاً. النص القصير قابل للتخمين، فاختر قيمة طويلة.
    - `CRON_SECRET`: أي نص عشوائي طويل (`openssl rand -hex 24`)؛ تستخدمه Vercel تلقائياً لاستدعاء المزامنة اليومية.
    - لزر الذكاء الاصطناعي: `GEMINI_API_KEY` (مفتاح Google Gemini؛ إن وُجد يُستخدم أولاً) أو `ANTHROPIC_API_KEY`، واختيارياً `AI_MODEL`. بدون أي منهما يعمل ملخص بسيط محلي.
 4. **قاعدة البيانات:** من تبويب **Storage** في المشروع اختر **Create Database → Neon (Postgres)** واربطها بالمشروع لكل البيئات. يضيف الربط `DATABASE_URL` تلقائياً. (إن ظهر عدة متغيرات فالمطلوب `DATABASE_URL` ذو الاتصال المُجمَّع Pooled.) الجداول تُنشأ تلقائياً عند أول طلب.
