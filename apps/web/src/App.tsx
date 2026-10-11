@@ -27,6 +27,7 @@ export function App() {
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<GroupId>("all");
   const [limit, setLimit] = useState(200);
+  const [country, setCountry] = useState("");
   const [hits, setHits] = useState<string[] | null>(null);
   const [recs, setRecs] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -72,10 +73,18 @@ export function App() {
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
-    return group === "all" ? list : list.filter((c) => groupsOf(c).includes(group));
-  }, [channels, hits, group]);
+    return list.filter((c) => (group === "all" || groupsOf(c).includes(group)) && (!country || c.country === country));
+  }, [channels, hits, group, country]);
+  // Countries present in the chosen group (so "Europe" can be narrowed to France, Germany, ...), with counts.
+  const countries = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const c of channels) if (!c.hidden && c.country && (group === "all" || groupsOf(c).includes(group))) n.set(c.country, (n.get(c.country) ?? 0) + 1);
+    const names = (() => { try { return new Intl.DisplayNames([lang], { type: "region" }); } catch { return undefined; } })();
+    return [...n].map(([code, count]) => ({ code, count, name: names?.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [channels, group, lang]);
   const counts = useMemo(() => groupCounts(channels.filter((c) => !c.hidden)), [channels]);
-  useEffect(() => setLimit(200), [group, hits]);
+  useEffect(() => setLimit(200), [group, hits, country]);
+  useEffect(() => setCountry(""), [group]);
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
@@ -120,6 +129,12 @@ export function App() {
                     {s[`g_${g}` as keyof typeof s]} <small>{counts[g]}</small>
                   </button>
                 ))}
+                {countries.length > 1 && (
+                  <select aria-label={s.country} value={country} onChange={(e) => setCountry(e.target.value)}>
+                    <option value="">{s.allCountries}</option>
+                    {countries.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.count})</option>)}
+                  </select>
+                )}
               </div>
             )}
             <ul>

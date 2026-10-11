@@ -92,6 +92,7 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
         {sel("category", s.category, facets?.categories)}
         {sel("language", s.language, facets?.languages)}
         <button aria-pressed={f.arabic === "1"} onClick={() => setF({ ...f, arabic: f.arabic === "1" ? undefined : "1" })}>{s.arabicOnly}</button>
+        <button aria-pressed={f.europe === "1"} onClick={() => setF({ ...f, europe: f.europe === "1" ? undefined : "1" })}>{s.europeOnly}</button>
       </div>
       <p>
         <strong>{total.toLocaleString()}</strong> {s.channelsFound}{" "}
