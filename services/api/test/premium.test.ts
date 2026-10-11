@@ -1,3 +1,4 @@
+import { geminiModel, modelFromEnv } from "../src/ai";
 import { describe, expect, it } from "vitest";
 import type { TextModel } from "../src/ai";
 import { syncIptvOrg } from "../src/jobs/catalog";
@@ -133,5 +134,33 @@ describe("AI helpers", () => {
     const sim = (await app.inject({ url: `/v1/me/channels/${a.id}/similar`, headers: alice })).json();
     expect(sim[0].id).toBe(b.id);
     expect((await app.inject({ url: `/v1/me/channels/${a.id}/similar`, headers: bob })).statusCode).toBe(404);
+  });
+});
+
+describe("gemini provider", () => {
+  it("calls the Generative Language API with the key in a header and parses the reply", async () => {
+    let seen: { url: string; headers: Record<string, string>; body: any } | undefined;
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      seen = { url, headers: init.headers as Record<string, string>, body: JSON.parse(init.body as string) };
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: " مرحبا " }] } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const out = await geminiModel("k123", { fetchImpl }).complete("sys", "hello", 100);
+    expect(out).toBe("مرحبا");
+    expect(seen!.url).toContain("generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent");
+    expect(seen!.url).not.toContain("k123");
+    expect(seen!.headers["x-goog-api-key"]).toBe("k123");
+    expect(seen!.body.systemInstruction.parts[0].text).toBe("sys");
+    expect(seen!.body.contents[0].parts[0].text).toBe("hello");
+  });
+  it("rejects on HTTP errors and empty candidates", async () => {
+    const bad = (async () => new Response("{}", { status: 429 })) as unknown as typeof fetch;
+    await expect(geminiModel("k", { fetchImpl: bad }).complete("s", "u", 10)).rejects.toThrow("HTTP 429");
+    const empty = (async () => new Response(JSON.stringify({ candidates: [] }), { status: 200 })) as unknown as typeof fetch;
+    await expect(geminiModel("k", { fetchImpl: empty }).complete("s", "u", 10)).rejects.toThrow("no text");
+  });
+  it("prefers Gemini over Claude, then Claude, then nothing", () => {
+    expect(modelFromEnv({})).toBeUndefined();
+    expect(modelFromEnv({ ANTHROPIC_API_KEY: "a" })).toBeDefined();
+    expect(modelFromEnv({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" })).toBeDefined();
   });
 });

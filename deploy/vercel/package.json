@@ -2,5 +2,11 @@
   "name": "receiver-vercel",
   "private": true,
   "type": "module",
-  "description": "Vercel entry point: static web app + serverless API + cron sync. See docs/DEPLOYMENT.md (النشر على Vercel)."
+  "description": "Vercel entry point: static web app + serverless API + cron sync. See docs/DEPLOYMENT.md (النشر على Vercel).",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
 }

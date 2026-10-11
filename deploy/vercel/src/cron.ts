@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { checkStreamHealth, syncIptvOrg } from "../../../services/api/src/jobs/catalog";
 import { createSafeFetch } from "../../../services/api/src/safeFetch";
-import { getRuntime } from "./_app";
+import { getRuntime } from "./app";
 
 const authorized = (header: string | undefined): boolean => {
   const secret = process.env.CRON_SECRET;

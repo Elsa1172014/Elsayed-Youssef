@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { claudeModel } from "../../../services/api/src/ai";
+import { modelFromEnv } from "../../../services/api/src/ai";
 import { AuthService, tokenAuthenticator } from "../../../services/api/src/auth";
 import { buildApp } from "../../../services/api/src/app";
 import { secretBoxFromEnv } from "../../../services/api/src/crypto";
@@ -8,7 +8,7 @@ import { createSafeFetch } from "../../../services/api/src/safeFetch";
 import { Store } from "../../../services/api/src/store";
 
 // Serverless: no persistent containers, so keep one small pool per warm instance and build the app once.
-process.env.MIGRATIONS_DIR ??= fileURLToPath(new URL("../migrations", import.meta.url));
+process.env.MIGRATIONS_DIR ??= fileURLToPath(new URL("./migrations", import.meta.url));
 process.env.PG_POOL_MAX ??= "2";
 process.env.NODE_ENV ??= "production";
 
@@ -32,7 +32,7 @@ export function getRuntime(): Promise<Runtime> {
       fetcher: createSafeFetch(),
       allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
       trustProxy: true, // Vercel's edge sets X-Forwarded-For
-      model: process.env.ANTHROPIC_API_KEY ? claudeModel(process.env.ANTHROPIC_API_KEY, { model: process.env.AI_MODEL }) : undefined,
+      model: modelFromEnv(),
     });
     await app.ready();
     return { store, auth, app };
