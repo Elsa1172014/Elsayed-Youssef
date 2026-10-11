@@ -61,6 +61,11 @@ export function App() {
     void api.me().then((m) => setUsername(m.username)).catch(() => undefined);
   }, [signedIn, refresh]);
 
+  // Channels can be added from other tabs (catalog, premium, manage) or other devices: reload when opening Live/Guide/Manage.
+  useEffect(() => {
+    if (signedIn && (tab === "live" || tab === "guide" || tab === "manage")) void refresh();
+  }, [tab, signedIn, refresh]);
+
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
@@ -76,9 +81,18 @@ export function App() {
         <h1>Smart Receiver</h1>
         <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{s[x]}</button>)}</nav>
         <input
+          type="search"
+          name="channel-search"
+          autoComplete="off"
+          data-1p-ignore
+          data-lpignore="true"
+          aria-label={s.search}
           placeholder={s.search}
           value={query}
           onChange={(e) => {
+            // Browser/password-manager autofill (e.g. the saved username) fills this box without the user focusing it;
+            // only typing counts as a search.
+            if (document.activeElement !== e.target) return;
             const q = e.target.value;
             setQuery(q);
             if (!q.trim()) return setHits(null);
@@ -93,6 +107,7 @@ export function App() {
         <div className="layout">
           <section className="list">
             {recs.length > 0 && !hits && <p className="hint">{s.forYou}: {recs.map((id) => channels.find((c) => c.id === id)?.name).filter(Boolean).slice(0, 3).join(", ")}</p>}
+            {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length === 0 ? s.noChannelsYet : ""}</p>}
             <ul>
               {visible.map((c) => (
                 <li key={c.id} className={selected?.id === c.id ? "active" : ""}>
