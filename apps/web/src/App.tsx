@@ -54,8 +54,14 @@ export function App() {
 
   const refresh = useCallback(
     () => run(async () => {
-      const [c, nn, r, sg] = await Promise.all([api.channels(), api.nowNext(), api.recommendations(), api.suggestions()]);
-      setChannels(c); setNowNext(nn); setRecs(r.map((x) => x.id)); setSuggestions(sg);
+      // The channel list is what matters: it is shown as soon as it arrives, and a failure of the optional extras
+      // (guide, recommendations, suggestions) never blanks it. A failed reload also keeps the previous list.
+      const extras = Promise.allSettled([api.nowNext(), api.recommendations(), api.suggestions()]);
+      await api.channels((soFar) => setChannels(soFar));
+      const [nn, r, sg] = await extras;
+      if (nn.status === "fulfilled") setNowNext(nn.value);
+      if (r.status === "fulfilled") setRecs(r.value.map((x) => x.id));
+      if (sg.status === "fulfilled") setSuggestions(sg.value);
     }),
     [run],
   );

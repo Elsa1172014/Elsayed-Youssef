@@ -227,12 +227,11 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     if (!src.enabled) return bad(reply, "Source is disabled", 409);
     const existing = new Set((await store.listChannels(uid)).filter((c) => c.sourceId === src.id).map((c) => c.streamUrl));
     let order = await store.nextSortOrder(uid);
-    let added = 0;
+    const fresh: Omit<UserChannel, "id">[] = [];
     const addNew = async (c: Omit<UserChannel, "id" | "userId" | "sourceId" | "sortOrder" | "hidden">) => {
       if (existing.has(c.streamUrl)) return;
       existing.add(c.streamUrl);
-      await store.addChannel({ ...c, userId: uid, sourceId: src.id, sortOrder: order++, hidden: false });
-      added++;
+      fresh.push({ ...c, userId: uid, sourceId: src.id, sortOrder: order++, hidden: false });
     };
     try {
       if (src.type === "xtream") {
@@ -245,13 +244,13 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
           await addNew({ name: c.name, logoUrl: c.logo, group: c.categoryName, epgChannelId: c.epgChannelId, streamUrl: xtreamStreamTemplate(creds.baseUrl, c.streamId) });
         }
       } else if (src.type === "m3u_url" && src.url) {
-        const res = await fetcher(src.url);
+        const res = await fetcher(src.url, { signal: AbortSignal.timeout(25_000) });
         if (!res.ok) return bad(reply, `Source returned HTTP ${res.status}`, 502);
         for (const e of parseM3U(await res.text()).entries) {
           await addNew({ name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo, group: e.groupTitle, epgChannelId: e.tvgId });
         }
       } else if (src.type === "xmltv" && src.url) {
-        const res = await fetcher(src.url);
+        const res = await fetcher(src.url, { signal: AbortSignal.timeout(25_000) });
         if (!res.ok) return bad(reply, `Source returned HTTP ${res.status}`, 502);
         const g = parseXmltv(await res.text());
         await store.replaceGuide(uid, `src:${src.id}`, 20, g.channels, g.programmes);
@@ -263,12 +262,25 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     } catch (e) {
       return bad(reply, `Sync failed: ${(e as Error).message}`, 502);
     }
+    try {
+      await store.addChannels(fresh);
+    } catch (e) {
+      return bad(reply, `Saving channels failed: ${(e as Error).message}`, 500);
+    }
     await store.updateSource(uid, src.id, { lastSyncAt: now().toISOString() });
-    return { added };
+    return { added: fresh.length };
   });
 
   // ---- Channels (full user editing control) ----
-  app.get("/v1/me/channels", async (req) => store.listChannels(uidOf(req)));
+  /** Without `limit` returns everything (small accounts, exports); clients page with limit/offset so a 10k-channel list never hits response-size or time limits. */
+  app.get("/v1/me/channels", async (req, reply) => {
+    const q = req.query as Record<string, string | undefined>;
+    const uid = uidOf(req);
+    const limit = Number(q.limit);
+    if (!Number.isInteger(limit) || limit <= 0) return store.listChannels(uid);
+    reply.header("x-total-count", await store.countChannels(uid));
+    return store.listChannels(uid, { limit: Math.min(limit, 2000), offset: Math.max(Number(q.offset) || 0, 0) });
+  });
 
   app.post("/v1/me/channels", async (req, reply) => {
     const b = body(req);
@@ -350,9 +362,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     const parsed = parseM3U(content);
     const source = await store.addSource({ userId: uid, type: "m3u_file", name: str(b.name, 120) ?? "Imported playlist", enabled: true, ownershipAttestedAt: now().toISOString() });
     let order = await store.nextSortOrder(uid);
-    for (const e of parsed.entries) {
-      await store.addChannel({ userId: uid, sourceId: source.id, name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo, group: e.groupTitle, epgChannelId: e.tvgId, sortOrder: order++, hidden: false });
-    }
+    await store.addChannels(parsed.entries.map((e) => ({ userId: uid, sourceId: source.id, name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo, group: e.groupTitle, epgChannelId: e.tvgId, sortOrder: order++, hidden: false })));
     return reply.code(201).send({ sourceId: source.id, imported: parsed.entries.length, warnings: parsed.warnings, epgUrls: parsed.epgUrls });
   });
 
