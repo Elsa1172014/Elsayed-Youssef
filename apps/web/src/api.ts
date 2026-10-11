@@ -146,7 +146,7 @@ export const api = {
     const r = await call<{ url: string; proxy: string }>(`/v1/me/channels/${id}/stream`);
     return { url: r.url, proxy: base + r.proxy };
   },
-  importM3U: (content: string) => call<{ imported: number }>("/v1/me/playlists/import", json("POST", { content, ownershipAttested: true })),
+  importM3U: (content: string, name?: string) => call<{ imported: number }>("/v1/me/playlists/import", json("POST", { content, name, ownershipAttested: true })),
   importEpg: (content: string) => call<{ programmes: number }>("/v1/me/epg/import", json("POST", { content })),
   exportM3U: async () => {
     const res = await fetch(`${base}/v1/me/playlists/export.m3u`, { headers: { authorization: `Bearer ${token}` } });

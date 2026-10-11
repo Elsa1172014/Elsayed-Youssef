@@ -173,7 +173,7 @@ export function ManageView({
         ))}
       </ul>
 
-      <label>{s.importM3U} <input type="file" accept=".m3u,.m3u8,text/plain" disabled={!attested} onChange={(e) => readFile(e.target.files?.[0], api.importM3U)} /></label>
+      <label>{s.importM3U} <input type="file" accept=".m3u,.m3u8,text/plain" disabled={!attested} onChange={(e) => { const f = e.target.files?.[0]; readFile(f, (text) => api.importM3U(text, f?.name.replace(/\.[^.]+$/, ""))); }} /></label>
       <label>{s.importEpg} <input type="file" accept=".xml,text/xml" onChange={(e) => readFile(e.target.files?.[0], api.importEpg)} /></label>
       <button onClick={() => run(async () => {
         const url = URL.createObjectURL(new Blob([await api.exportM3U()], { type: "audio/x-mpegurl" }));
