@@ -8,7 +8,8 @@ export interface Db {
   exec?(sql: string): Promise<unknown>;
 }
 
-const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+// MIGRATIONS_DIR lets serverless bundles (Vercel) point at a copy of the SQL files shipped with the function.
+const MIGRATIONS_DIR = process.env.MIGRATIONS_DIR ?? join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
 /** Applies migrations/*.sql in filename order, once each. */
 export async function migrate(db: Db): Promise<string[]> {
