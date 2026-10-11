@@ -55,9 +55,12 @@ export interface CatalogFilter {
   language?: string;
   /** "1": Arab-world channels only (Arabic language or an Arab League country). */
   arabic?: string;
+  /** "1": European channels only (see EUROPE). */
+  europe?: string;
 }
 
-export const ARAB_COUNTRIES = ["SA", "EG", "AE", "QA", "KW", "BH", "OM", "JO", "LB", "SY", "IQ", "YE", "PS", "SD", "LY", "TN", "DZ", "MA", "MR", "SO", "DJ", "KM"];
+export const EUROPE = ["AL", "AD", "AT", "BY", "BE", "BA", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IS", "IE", "IT", "XK", "LV", "LI", "LT", "LU", "MT", "MD", "MC", "ME", "NL", "MK", "NO", "PL", "PT", "RO", "RU", "SM", "RS", "SK", "SI", "ES", "SE", "CH", "UA", "GB", "VA"];
+const ARAB_COUNTRIES = ["SA", "EG", "AE", "QA", "KW", "BH", "OM", "JO", "LB", "SY", "IQ", "YE", "PS", "SD", "LY", "TN", "DZ", "MA", "MR", "SO", "DJ", "KM"];
 
 export interface CatalogEntry extends Omit<CatalogChannel, "streams"> {
   status: "active" | "blocked" | "closed";
@@ -316,6 +319,7 @@ export class Store {
     if (opts.category) { vals.push(JSON.stringify([opts.category.toLowerCase()])); where.push(`categories @> $${vals.length}::jsonb`); }
     if (opts.language) { vals.push(JSON.stringify([opts.language.toLowerCase()])); where.push(`languages @> $${vals.length}::jsonb`); }
     if (opts.arabic === "1") { vals.push(ARAB_COUNTRIES, JSON.stringify(["ara"])); where.push(`(country = ANY($${vals.length - 1}::text[]) OR languages @> $${vals.length}::jsonb)`); }
+    if (opts.europe === "1") { vals.push(EUROPE); where.push(`country = ANY($${vals.length}::text[])`); }
     return { sql: where.join(" AND "), vals };
   }
 
