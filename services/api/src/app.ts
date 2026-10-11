@@ -1,29 +1,38 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
-  assertPublicHttpUrl, parseM3U, parseXmltv, recommend, searchChannels, serializeM3U, suggestEpgMappings, type M3UEntry,
+  assertPublicHttpUrl, fillCredentials, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
+  parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
+  xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
 import type { Authenticator } from "./auth";
-import type { SourceType, Store, UserChannel } from "./store";
+import type { SecretBox } from "./crypto";
+import type { SafeFetch } from "./safeFetch";
+import type { SourceType, Store, UserChannel, UserSource } from "./store";
 
 const SOURCE_TYPES: SourceType[] = ["m3u_url", "m3u_file", "xtream", "xmltv", "tuner"];
-const MAX_PLAYLIST_BYTES = 10 * 1024 * 1024;
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
+const embedder = hashingEmbedder();
 
 interface Deps {
   store: Store;
   authenticate: Authenticator;
+  secrets: SecretBox;
+  fetcher: SafeFetch;
   now?: () => Date;
 }
 
-function bad(reply: FastifyReply, message: string, code = 400) {
-  return reply.code(code).send({ error: message });
+const bad = (reply: FastifyReply, message: string, code = 400) => reply.code(code).send({ error: message });
+const str = (v: unknown, max = 500): string | undefined => (typeof v === "string" && v.length > 0 && v.length <= max ? v : undefined);
+const clampPriority = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100 ? (v as number) : 20);
+
+interface Creds {
+  baseUrl: string;
+  username: string;
+  password: string;
 }
 
-function str(v: unknown, max = 500): string | undefined {
-  return typeof v === "string" && v.length > 0 && v.length <= max ? v : undefined;
-}
-
-export function buildApp({ store, authenticate, now = () => new Date() }: Deps): FastifyInstance {
-  const app = Fastify({ logger: false, bodyLimit: MAX_PLAYLIST_BYTES });
+export function buildApp({ store, authenticate, secrets, fetcher, now = () => new Date() }: Deps): FastifyInstance {
+  const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES });
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -34,18 +43,29 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
     (req as FastifyRequest & { uid: string }).uid = uid;
   });
   const uidOf = (req: FastifyRequest) => (req as FastifyRequest & { uid: string }).uid;
+  const body = (req: FastifyRequest) => (req.body ?? {}) as Record<string, unknown>;
+
+  const credsOf = async (uid: string, src: UserSource): Promise<Creds | undefined> => {
+    const sealed = await store.getSourceSecret(uid, src.id);
+    return sealed ? (JSON.parse(secrets.open(sealed)) as Creds) : undefined;
+  };
+  /** Resolves credential placeholders in a stored stream URL using the owning source's secret. */
+  const resolveStream = async (uid: string, c: UserChannel): Promise<string> => {
+    if (!c.streamUrl.includes("{username}") || !c.sourceId) return c.streamUrl;
+    const src = await store.getSource(uid, c.sourceId);
+    const creds = src && (await credsOf(uid, src));
+    return creds ? fillCredentials(c.streamUrl, creds) : c.streamUrl;
+  };
 
   // ---- Sources (user-owned; legal attestation required) ----
   app.get("/v1/me/sources", async (req) => store.listSources(uidOf(req)));
 
   app.post("/v1/me/sources", async (req, reply) => {
-    const b = (req.body ?? {}) as Record<string, unknown>;
+    const b = body(req);
     const name = str(b.name, 120);
     if (!name) return bad(reply, "name is required");
     if (!SOURCE_TYPES.includes(b.type as SourceType)) return bad(reply, "invalid type");
-    if (b.ownershipAttested !== true) {
-      return bad(reply, "You must attest that you own or are entitled to use this source");
-    }
+    if (b.ownershipAttested !== true) return bad(reply, "You must attest that you own or are entitled to use this source");
     let url: string | undefined;
     if (b.url !== undefined) {
       try {
@@ -54,15 +74,23 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
         return bad(reply, (e as Error).message);
       }
     }
-    const row = store.addSource({
-      userId: uidOf(req), type: b.type as SourceType, name, enabled: true, url, ownershipAttestedAt: now().toISOString(),
-    });
+    let sealed: string | undefined;
+    if (b.type === "xtream") {
+      const username = str(b.username, 200);
+      const password = str(b.password, 200);
+      if (!url || !username || !password) return bad(reply, "Xtream sources need url, username and password");
+      sealed = secrets.seal(JSON.stringify({ baseUrl: url, username, password } satisfies Creds));
+    }
+    const row = await store.addSource(
+      { userId: uidOf(req), type: b.type as SourceType, name, enabled: true, url, ownershipAttestedAt: now().toISOString() },
+      sealed,
+    );
     return reply.code(201).send(row);
   });
 
   app.patch("/v1/me/sources/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = (req.body ?? {}) as Record<string, unknown>;
+    const b = body(req);
     const patch: { name?: string; enabled?: boolean; url?: string } = {};
     if (b.name !== undefined) {
       const n = str(b.name, 120);
@@ -80,20 +108,71 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
         return bad(reply, (e as Error).message);
       }
     }
-    const row = store.updateSource(uidOf(req), id, patch);
+    const row = await store.updateSource(uidOf(req), id, patch);
     return row ?? bad(reply, "Not found", 404);
   });
 
   app.delete("/v1/me/sources/:id", async (req, reply) => {
-    const ok = store.deleteSource(uidOf(req), (req.params as { id: string }).id);
+    const ok = await store.deleteSource(uidOf(req), (req.params as { id: string }).id);
     return ok ? reply.code(204).send() : bad(reply, "Not found", 404);
+  });
+
+  /**
+   * Refreshes a source's channel list or guide from the user's own provider (metadata only; no media).
+   * Re-sync only ADDS channels it has not seen, so the user's renames, hides and reordering are never overwritten.
+   */
+  app.post("/v1/me/sources/:id/sync", async (req, reply) => {
+    const uid = uidOf(req);
+    const src = await store.getSource(uid, (req.params as { id: string }).id);
+    if (!src) return bad(reply, "Not found", 404);
+    if (!src.enabled) return bad(reply, "Source is disabled", 409);
+    const existing = new Set((await store.listChannels(uid)).filter((c) => c.sourceId === src.id).map((c) => c.streamUrl));
+    let order = await store.nextSortOrder(uid);
+    let added = 0;
+    const addNew = async (c: Omit<UserChannel, "id" | "userId" | "sourceId" | "sortOrder" | "hidden">) => {
+      if (existing.has(c.streamUrl)) return;
+      existing.add(c.streamUrl);
+      await store.addChannel({ ...c, userId: uid, sourceId: src.id, sortOrder: order++, hidden: false });
+      added++;
+    };
+    try {
+      if (src.type === "xtream") {
+        const creds = await credsOf(uid, src);
+        if (!creds) return bad(reply, "Missing credentials", 409);
+        const get = async (action?: string) => JSON.parse(await (await fetcher(xtreamApiUrl(creds, action))).text()) as unknown;
+        if (!xtreamAuthOk(await get())) return bad(reply, "The provider did not accept these credentials or the subscription is not active", 502);
+        const channels = parseXtreamLive(await get("get_live_categories"), await get("get_live_streams"));
+        for (const c of channels) {
+          await addNew({ name: c.name, logoUrl: c.logo, group: c.categoryName, epgChannelId: c.epgChannelId, streamUrl: xtreamStreamTemplate(creds.baseUrl, c.streamId) });
+        }
+      } else if (src.type === "m3u_url" && src.url) {
+        const res = await fetcher(src.url);
+        if (!res.ok) return bad(reply, `Source returned HTTP ${res.status}`, 502);
+        for (const e of parseM3U(await res.text()).entries) {
+          await addNew({ name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo, group: e.groupTitle, epgChannelId: e.tvgId });
+        }
+      } else if (src.type === "xmltv" && src.url) {
+        const res = await fetcher(src.url);
+        if (!res.ok) return bad(reply, `Source returned HTTP ${res.status}`, 502);
+        const g = parseXmltv(await res.text());
+        await store.replaceGuide(uid, `src:${src.id}`, 20, g.channels, g.programmes);
+        await store.updateSource(uid, src.id, { lastSyncAt: now().toISOString() });
+        return { programmes: g.programmes.length, channels: g.channels.length };
+      } else {
+        return bad(reply, "This source type has nothing to sync", 400);
+      }
+    } catch (e) {
+      return bad(reply, `Sync failed: ${(e as Error).message}`, 502);
+    }
+    await store.updateSource(uid, src.id, { lastSyncAt: now().toISOString() });
+    return { added };
   });
 
   // ---- Channels (full user editing control) ----
   app.get("/v1/me/channels", async (req) => store.listChannels(uidOf(req)));
 
   app.post("/v1/me/channels", async (req, reply) => {
-    const b = (req.body ?? {}) as Record<string, unknown>;
+    const b = body(req);
     const name = str(b.name, 200);
     if (!name) return bad(reply, "name is required");
     let streamUrl: string;
@@ -103,17 +182,17 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
       return bad(reply, (e as Error).message);
     }
     const uid = uidOf(req);
-    const row = store.addChannel({
+    const row = await store.addChannel({
       userId: uid, name, streamUrl, logoUrl: str(b.logoUrl, 1000), group: str(b.group, 120),
-      epgChannelId: str(b.epgChannelId, 200), sortOrder: store.listChannels(uid).length, hidden: false,
+      epgChannelId: str(b.epgChannelId, 200), sortOrder: await store.nextSortOrder(uid), hidden: false,
     });
     return reply.code(201).send(row);
   });
 
   app.patch("/v1/me/channels/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = (req.body ?? {}) as Record<string, unknown>;
-    const patch: Partial<Omit<UserChannel, "id" | "userId">> = {};
+    const b = body(req);
+    const patch: Partial<Omit<UserChannel, "id" | "userId" | "sourceId">> = {};
     if (b.name !== undefined) {
       const n = str(b.name, 200);
       if (!n) return bad(reply, "invalid name");
@@ -137,75 +216,112 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
       if (typeof b.hidden !== "boolean") return bad(reply, "invalid hidden");
       patch.hidden = b.hidden;
     }
-    return store.updateChannel(uidOf(req), id, patch) ?? bad(reply, "Not found", 404);
+    return (await store.updateChannel(uidOf(req), id, patch)) ?? bad(reply, "Not found", 404);
   });
 
   app.delete("/v1/me/channels/:id", async (req, reply) => {
-    return store.deleteChannel(uidOf(req), (req.params as { id: string }).id)
-      ? reply.code(204).send()
-      : bad(reply, "Not found", 404);
+    return (await store.deleteChannel(uidOf(req), (req.params as { id: string }).id)) ? reply.code(204).send() : bad(reply, "Not found", 404);
   });
 
-  // ---- Playlist import / export (M3U text supplied by the user) ----
+  /** Playable URL for the client (credentials filled in for the owner's own Xtream account). */
+  app.get("/v1/me/channels/:id/stream", async (req, reply) => {
+    const uid = uidOf(req);
+    const c = await store.getChannel(uid, (req.params as { id: string }).id);
+    return c ? { url: await resolveStream(uid, c) } : bad(reply, "Not found", 404);
+  });
+
+  // ---- Playlist import / export ----
   app.post("/v1/me/playlists/import", async (req, reply) => {
-    const b = (req.body ?? {}) as Record<string, unknown>;
+    const b = body(req);
     const content = typeof b.content === "string" ? b.content : undefined;
     if (!content) return bad(reply, "content (M3U text) is required");
-    if (b.ownershipAttested !== true) {
-      return bad(reply, "You must attest that you own or are entitled to use this playlist");
-    }
+    if (b.ownershipAttested !== true) return bad(reply, "You must attest that you own or are entitled to use this playlist");
     const uid = uidOf(req);
     const parsed = parseM3U(content);
-    const source = store.addSource({
-      userId: uid, type: "m3u_file", name: str(b.name, 120) ?? "Imported playlist", enabled: true,
-      ownershipAttestedAt: now().toISOString(),
-    });
-    let order = store.listChannels(uid).length;
+    const source = await store.addSource({ userId: uid, type: "m3u_file", name: str(b.name, 120) ?? "Imported playlist", enabled: true, ownershipAttestedAt: now().toISOString() });
+    let order = await store.nextSortOrder(uid);
     for (const e of parsed.entries) {
-      store.addChannel({
-        userId: uid, sourceId: source.id, name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo,
-        group: e.groupTitle, epgChannelId: e.tvgId, sortOrder: order++, hidden: false,
-      });
+      await store.addChannel({ userId: uid, sourceId: source.id, name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo, group: e.groupTitle, epgChannelId: e.tvgId, sortOrder: order++, hidden: false });
     }
     return reply.code(201).send({ sourceId: source.id, imported: parsed.entries.length, warnings: parsed.warnings, epgUrls: parsed.epgUrls });
   });
 
   app.get("/v1/me/playlists/export.m3u", async (req, reply) => {
-    const entries: M3UEntry[] = store.listChannels(uidOf(req)).filter((c) => !c.hidden).map((c) => ({
-      name: c.name, url: c.streamUrl, duration: -1, tvgId: c.epgChannelId, tvgLogo: c.logoUrl, groupTitle: c.group, attrs: {},
-    }));
+    const uid = uidOf(req);
+    const entries: M3UEntry[] = [];
+    for (const c of (await store.listChannels(uid)).filter((x) => !x.hidden)) {
+      entries.push({ name: c.name, url: await resolveStream(uid, c), duration: -1, tvgId: c.epgChannelId, tvgLogo: c.logoUrl, groupTitle: c.group, attrs: {} });
+    }
     return reply.header("content-type", "audio/x-mpegurl; charset=utf-8").send(serializeM3U(entries));
   });
 
-  // ---- EPG (user-supplied XMLTV) ----
+  // ---- EPG ----
   app.post("/v1/me/epg/import", async (req, reply) => {
-    const b = (req.body ?? {}) as Record<string, unknown>;
+    const b = body(req);
     if (typeof b.content !== "string" || !b.content) return bad(reply, "content (XMLTV text) is required");
     const r = parseXmltv(b.content);
-    store.replaceProgrammes(uidOf(req), r.programmes, r.channels);
+    await store.replaceGuide(uidOf(req), str(b.sourceKey, 80) ? `manual:${b.sourceKey as string}` : "manual", clampPriority(b.priority), r.channels, r.programmes);
     return reply.code(201).send({ channels: r.channels.length, programmes: r.programmes.length, warnings: r.warnings.length });
   });
+
+  const programmesFor = async (uid: string, epgChannelId: string, from: string, to: string) =>
+    mergeProgrammes(await store.listProgrammes(uid, epgChannelId, from, to));
 
   app.get("/v1/epg/now-next", async (req, reply) => {
     const uid = uidOf(req);
     const t = now().toISOString();
     const far = new Date(now().getTime() + 24 * 3600_000).toISOString();
     const result: Record<string, { now?: unknown; next?: unknown }> = {};
-    for (const c of store.listChannels(uid)) {
+    for (const c of await store.listChannels(uid)) {
       if (!c.epgChannelId) continue;
-      const list = store.listProgrammes(uid, c.epgChannelId, t, far);
+      const list = await programmesFor(uid, c.epgChannelId, t, far);
       result[c.id] = { now: list.find((p) => p.start <= t && p.stop > t), next: list.find((p) => p.start > t) };
     }
     return reply.send(result);
   });
 
-  // ---- AI-assisted discovery (runs only over the caller's own channels) ----
-  const nowPlayingFor = (uid: string) => {
+  /** Time-window grid for the EPG view: `from`/`to` ISO timestamps, max 48h. */
+  app.get("/v1/epg/grid", async (req, reply) => {
+    const q = req.query as Record<string, string | undefined>;
+    const from = new Date(q.from ?? now().toISOString());
+    const to = new Date(q.to ?? new Date(from.getTime() + 6 * 3600_000).toISOString());
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from || to.getTime() - from.getTime() > 48 * 3600_000) {
+      return bad(reply, "invalid time window (max 48h)");
+    }
+    const uid = uidOf(req);
+    const out: Record<string, unknown[]> = {};
+    for (const c of await store.listChannels(uid)) {
+      if (c.epgChannelId && !c.hidden) out[c.id] = await programmesFor(uid, c.epgChannelId, from.toISOString(), to.toISOString());
+    }
+    return out;
+  });
+
+  // ---- Free catalog (official / FAST / open directory) ----
+  app.get("/v1/catalog", async (req) => {
+    const q = req.query as Record<string, string | undefined>;
+    return store.searchCatalog({ q: q.q, country: q.country, category: q.category, limit: Number(q.limit) || undefined });
+  });
+
+  app.post("/v1/catalog/:id/add", async (req, reply) => {
+    const uid = uidOf(req);
+    const entry = await store.getCatalogChannel((req.params as { id: string }).id);
+    if (!entry || entry.status !== "active") return bad(reply, "Not found", 404);
+    const best = rankStreams(entry.streams)[0];
+    if (!best) return bad(reply, "No stream available", 409);
+    const row = await store.addChannel({
+      userId: uid, name: entry.name, streamUrl: best.url, logoUrl: entry.logoUrl, group: entry.categories[0],
+      sortOrder: await store.nextSortOrder(uid), hidden: false,
+    });
+    return reply.code(201).send(row);
+  });
+
+  // ---- Discovery: hybrid lexical + embedding search, recommendations (own channels only) ----
+  const nowPlayingFor = async (uid: string, channels: UserChannel[]) => {
     const t = now().toISOString();
     const map: Record<string, { title: string; category?: string }> = {};
-    for (const c of store.listChannels(uid)) {
+    for (const c of channels) {
       if (!c.epgChannelId) continue;
-      const p = store.listProgrammes(uid, c.epgChannelId, t, t).find((x) => x.start <= t && x.stop > t);
+      const p = (await programmesFor(uid, c.epgChannelId, t, t)).find((x) => x.start <= t && x.stop > t);
       if (p) map[c.id] = { title: p.title, category: p.category };
     }
     return map;
@@ -215,33 +331,39 @@ export function buildApp({ store, authenticate, now = () => new Date() }: Deps):
     const q = str((req.query as Record<string, unknown>).q, 200);
     if (!q) return bad(reply, "q is required");
     const uid = uidOf(req);
-    return searchChannels(q, store.listChannels(uid), nowPlayingFor(uid));
+    const channels = (await store.listChannels(uid)).filter((c) => !c.hidden);
+    const playing = await nowPlayingFor(uid, channels);
+    const lexical = searchChannels(q, channels, playing);
+    const semantic = nearest(embedder.embed(q), channels.map((c) => ({ id: c.id, vector: embedder.embed(`${c.name} ${c.group ?? ""} ${playing[c.id]?.title ?? ""}`) })), 20, 0.3);
+    const lexScore = new Map(lexical.map((h) => [h.id, h.score]));
+    const ids = fuseRankings([lexical.map((h) => h.id), semantic.map((h) => h.id)]);
+    return ids.map((id) => ({ id, score: lexScore.get(id) ?? 0 }));
   });
 
   app.post("/v1/me/watch-events", async (req, reply) => {
-    const b = (req.body ?? {}) as Record<string, unknown>;
+    const b = body(req);
     const uid = uidOf(req);
-    if (typeof b.channelId !== "string" || !store.getChannel(uid, b.channelId)) return bad(reply, "unknown channel", 404);
+    if (typeof b.channelId !== "string" || !(await store.getChannel(uid, b.channelId))) return bad(reply, "unknown channel", 404);
     if (typeof b.seconds !== "number" || !(b.seconds > 0) || b.seconds > 86_400) return bad(reply, "invalid seconds");
-    store.addWatchEvent(uid, { channelId: b.channelId, seconds: b.seconds });
+    await store.addWatchEvent(uid, { channelId: b.channelId, seconds: b.seconds });
     return reply.code(204).send();
   });
 
   // Viewing history is the user's to delete.
   app.delete("/v1/me/watch-events", async (req, reply) => {
-    store.clearWatchEvents(uidOf(req));
+    await store.clearWatchEvents(uidOf(req));
     return reply.code(204).send();
   });
 
   app.get("/v1/recommendations", async (req) => {
     const uid = uidOf(req);
-    return recommend(store.listChannels(uid), store.listWatchEvents(uid));
+    return recommend(await store.listChannels(uid), await store.listWatchEvents(uid));
   });
 
-  // Suggestions only; the client applies one via PATCH /v1/me/channels/:id after the user approves.
+  // Suggestions only; the client applies one via PATCH after the user approves.
   app.get("/v1/me/epg/suggestions", async (req) => {
     const uid = uidOf(req);
-    return suggestEpgMappings(store.listChannels(uid), store.listGuideChannels(uid));
+    return suggestEpgMappings(await store.listChannels(uid), await store.listGuideChannels(uid));
   });
 
   return app;

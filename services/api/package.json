@@ -6,7 +6,10 @@
   "scripts": {
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync-iptv-org": "tsx src/jobs/cli.ts sync-iptv-org",
+    "sync-official": "tsx src/jobs/cli.ts sync-official",
+    "check-health": "tsx src/jobs/cli.ts check-health"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
