@@ -162,7 +162,7 @@ export function ManageView({
       }}>
         <input placeholder={s.name} value={form.name} onChange={set("name")} required />
         <select value={form.type} onChange={set("type")} aria-label={s.type}>
-          <option value="m3u_url">M3U URL</option><option value="xtream">Xtream</option><option value="xmltv">XMLTV guide</option>
+          <option value="m3u_url">M3U / M3U8 URL</option><option value="xtream">Xtream</option><option value="xmltv">XMLTV guide</option>
         </select>
         <input placeholder={s.url} value={form.url} onChange={set("url")} required />
         {form.type === "xtream" && (<>
