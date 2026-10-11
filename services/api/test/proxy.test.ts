@@ -157,6 +157,8 @@ describe("persistence", () => {
     const sync = await app.inject({ method: "POST", url: `/v1/me/sources/${src.id}/sync`, headers: alice });
     expect(sync.json()).toEqual({ added: 1200 });
 
+    expect((await app.inject({ url: "/v1/me/stats", headers: alice })).json()).toMatchObject({ channels: 1201, sources: 1 });
+
     // sign out (revokes the session only), then sign in again with the same credentials
     expect((await app.inject({ method: "POST", url: "/v1/auth/logout", headers: alice })).statusCode).toBeLessThan(300);
     expect((await app.inject({ url: "/v1/me/channels", headers: alice })).statusCode).toBe(401);

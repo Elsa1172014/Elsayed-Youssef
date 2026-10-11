@@ -272,6 +272,12 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
   });
 
   // ---- Channels (full user editing control) ----
+  /** What the server actually has saved for this account: lets the app say "0 saved" vs "still loading" instead of guessing. */
+  app.get("/v1/me/stats", async (req) => {
+    const uid = uidOf(req);
+    return { channels: await store.countChannels(uid), sources: (await store.listSources(uid)).length, catalog: await store.countCatalog({}) };
+  });
+
   /** Without `limit` returns everything (small accounts, exports); clients page with limit/offset so a 10k-channel list never hits response-size or time limits. */
   app.get("/v1/me/channels", async (req, reply) => {
     const q = req.query as Record<string, string | undefined>;

@@ -174,6 +174,7 @@ export const api = {
     return { items: (await res.json()) as CatalogEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
+  stats: () => call<{ channels: number; sources: number; catalog: number }>("/v1/me/stats"),
   syncStatus: () => call<{ running: boolean; channels: number; lastSync: { at: string; channels: number; streams: number; premium: number } | null }>("/v1/catalog/sync"),
   syncNow: () => call<{ channels: number; streams: number; premium: number }>("/v1/catalog/sync", json("POST")),
   premium: async (f: CatalogFilter, offset = 0) => {

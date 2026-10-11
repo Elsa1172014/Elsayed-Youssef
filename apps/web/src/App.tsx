@@ -32,6 +32,8 @@ export function App() {
   const [recs, setRecs] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [msg, setMsg] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [stats, setStats] = useState<{ channels: number; sources: number; catalog: number } | null>(null);
   const s = t(lang);
 
   const run = useCallback(async (fn: () => Promise<unknown>) => {
@@ -48,6 +50,8 @@ export function App() {
     persistToken("");
     setSignedIn(false);
     setChannels([]);
+    setLoaded(false);
+    setStats(null);
     setSelected(null);
   }, []);
   useEffect(() => setOnUnauthorized(signOut), [signOut]);
@@ -57,7 +61,13 @@ export function App() {
       // The channel list is what matters: it is shown as soon as it arrives, and a failure of the optional extras
       // (guide, recommendations, suggestions) never blanks it. A failed reload also keeps the previous list.
       const extras = Promise.allSettled([api.nowNext(), api.recommendations(), api.suggestions()]);
-      await api.channels((soFar) => setChannels(soFar));
+      void api.stats().then(setStats).catch(() => undefined);
+      try {
+        // Show the first pages immediately on a cold load; on a reload keep the current list until the new one is complete.
+        setChannels(await api.channels((soFar) => setChannels((prev) => (prev.length ? prev : soFar))));
+      } finally {
+        setLoaded(true);
+      }
       const [nn, r, sg] = await extras;
       if (nn.status === "fulfilled") setNowNext(nn.value);
       if (r.status === "fulfilled") setRecs(r.value.map((x) => x.id));
@@ -127,7 +137,7 @@ export function App() {
         <div className="layout">
           <section className="list">
             {recs.length > 0 && !hits && <p className="hint">{s.forYou}: {recs.map((id) => channels.find((c) => c.id === id)?.name).filter(Boolean).slice(0, 3).join(", ")}</p>}
-            {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length === 0 ? s.noChannelsYet : ""}</p>}
+            {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length > 0 ? "" : !loaded ? s.loading : stats && stats.channels > 0 ? `${s.loading} (${stats.channels.toLocaleString()})` : stats ? `${s.savedZero} ${stats.catalog > 0 ? s.catalogReady.replace("{n}", stats.catalog.toLocaleString()) : s.noChannelsYet}` : s.noChannelsYet}</p>}
             {!hits && (
               <div className="groups" role="tablist" aria-label="Groups">
                 {GROUP_ORDER.filter((g) => g === "all" || counts[g] > 0).map((g) => (
