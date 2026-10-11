@@ -83,5 +83,6 @@ CREATE TABLE catalog_streams (
   status text NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown','ok','dead')),
   latency_ms int,
   last_checked_at timestamptz,
-  UNIQUE (channel_id, url)
+  url_hash text GENERATED ALWAYS AS (md5(url)) STORED,  -- long URLs cannot be btree-indexed directly
+  UNIQUE (channel_id, url_hash)
 );

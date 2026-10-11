@@ -38,6 +38,13 @@ export interface CatalogStream {
   latencyMs?: number;
 }
 
+export interface CatalogFilter {
+  q?: string;
+  country?: string;
+  category?: string;
+  language?: string;
+}
+
 export interface CatalogEntry extends Omit<CatalogChannel, "streams"> {
   status: "active" | "blocked" | "closed";
   streams: CatalogStream[];
@@ -187,44 +194,136 @@ export class Store {
   }
 
   // ---- shared catalog ----
-  async upsertCatalog(channels: CatalogChannel[]) {
-    for (const c of channels) {
-      await this.db.query(
-        `INSERT INTO catalog_channels (id,name,country,languages,categories,logo_url,website,provenance,updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
-         ON CONFLICT (id) DO UPDATE SET name=$2,country=$3,languages=$4,categories=$5,logo_url=$6,website=$7,provenance=$8,updated_at=now()`,
-        [c.id, c.name, c.country ?? null, JSON.stringify(c.languages), JSON.stringify(c.categories), c.logoUrl ?? null, c.website ?? null, c.provenance],
-      );
-      for (const s of c.streams) {
-        await this.db.query("INSERT INTO catalog_streams (channel_id,url,quality) VALUES ($1,$2,$3) ON CONFLICT (channel_id,url) DO UPDATE SET quality=$3", [c.id, s.url, s.quality ?? null]);
-      }
-    }
-  }
-  private async attachStreams(rows: Row[]): Promise<CatalogEntry[]> {
-    const out: CatalogEntry[] = [];
-    for (const r of rows) {
-      const streams = (await this.db.query("SELECT * FROM catalog_streams WHERE channel_id=$1 ORDER BY id", [r.id])).rows.map((s) => ({
-        id: Number(s.id), url: s.url as string, quality: opt(s.quality as string | null), status: s.status as CatalogStream["status"],
-        latencyMs: opt(s.latency_ms as number | null),
-      }));
-      out.push({
-        id: r.id as string, name: r.name as string, country: opt(r.country as string | null), languages: r.languages as string[],
-        categories: r.categories as string[], logoUrl: opt(r.logo_url as string | null), website: opt(r.website as string | null),
-        provenance: r.provenance as CatalogEntry["provenance"], status: r.status as CatalogEntry["status"], streams,
+  /**
+   * Upserts catalog channels and their streams in batches. Moderator-blocked channels stay blocked; channels
+   * that were retired by an earlier sync come back to 'active' if the dataset lists them again.
+   * Returns the sync stamp used for pruning.
+   */
+  async upsertCatalog(channels: CatalogChannel[], stamp = new Date().toISOString()): Promise<string> {
+    const CH = 500;
+    for (let i = 0; i < channels.length; i += CH) {
+      const chunk = channels.slice(i, i + CH);
+      const vals: unknown[] = [];
+      const rows = chunk.map((c) => {
+        const base = vals.length;
+        vals.push(c.id, c.name, c.country ?? null, JSON.stringify(c.languages), JSON.stringify(c.categories), c.logoUrl ?? null, c.website ?? null, c.provenance, stamp);
+        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4}::jsonb,$${base + 5}::jsonb,$${base + 6},$${base + 7},$${base + 8},$${base + 9}::timestamptz)`;
       });
+      await this.db.query(
+        `INSERT INTO catalog_channels (id,name,country,languages,categories,logo_url,website,provenance,updated_at) VALUES ${rows.join(",")}
+         ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,country=EXCLUDED.country,languages=EXCLUDED.languages,categories=EXCLUDED.categories,
+           logo_url=EXCLUDED.logo_url,website=EXCLUDED.website,provenance=EXCLUDED.provenance,updated_at=EXCLUDED.updated_at,
+           status=CASE WHEN catalog_channels.status='blocked' THEN 'blocked' ELSE 'active' END`,
+        vals,
+      );
     }
-    return out;
+    const flat = channels.flatMap((c) => c.streams.map((s) => ({ id: c.id, url: s.url, quality: s.quality })));
+    const ST = 1000;
+    for (let i = 0; i < flat.length; i += ST) {
+      const chunk = flat.slice(i, i + ST);
+      const vals: unknown[] = [];
+      const rows = chunk.map((x) => {
+        const base = vals.length;
+        vals.push(x.id, x.url, x.quality ?? null, stamp);
+        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4}::timestamptz)`;
+      });
+      await this.db.query(
+        `INSERT INTO catalog_streams (channel_id,url,quality,seen_at) VALUES ${rows.join(",")}
+         ON CONFLICT (channel_id,url_hash) DO UPDATE SET quality=EXCLUDED.quality, seen_at=EXCLUDED.seen_at`,
+        vals,
+      );
+    }
+    return stamp;
   }
-  async searchCatalog(opts: { q?: string; country?: string; category?: string; limit?: number }) {
-    const where = ["status='active'"];
+
+  /**
+   * Retires directory entries a completed sync did not see (channel closed/blocklisted/removed upstream).
+   * Callers must skip this when the sync looks incomplete.
+   */
+  async pruneDirectory(stamp: string): Promise<{ closed: number; streamsRemoved: number }> {
+    const closed = await this.db.query("UPDATE catalog_channels SET status='closed' WHERE provenance='directory' AND status='active' AND updated_at<$1::timestamptz RETURNING id", [stamp]);
+    const removed = await this.db.query(
+      "DELETE FROM catalog_streams s USING catalog_channels c WHERE s.channel_id=c.id AND c.provenance='directory' AND s.seen_at<$1::timestamptz RETURNING s.id", [stamp],
+    );
+    return { closed: closed.rows.length, streamsRemoved: removed.rows.length };
+  }
+
+  async countActiveDirectory(): Promise<number> {
+    return Number((await this.db.query<{ n: string }>("SELECT count(*) AS n FROM catalog_channels WHERE provenance='directory' AND status='active'")).rows[0]?.n ?? 0);
+  }
+
+  async getSyncState(key: string): Promise<{ value: string; updatedAt: string } | undefined> {
+    const r = (await this.db.query("SELECT value, updated_at FROM sync_state WHERE key=$1", [key])).rows[0];
+    return r ? { value: r.value as string, updatedAt: iso(r.updated_at)! } : undefined;
+  }
+  async setSyncState(key: string, value: string) {
+    await this.db.query("INSERT INTO sync_state (key,value,updated_at) VALUES ($1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()", [key, value]);
+  }
+
+  private async attachStreams(rows: Row[]): Promise<CatalogEntry[]> {
+    if (rows.length === 0) return [];
+    const ids = rows.map((r) => r.id as string);
+    const streamRows = (await this.db.query("SELECT * FROM catalog_streams WHERE channel_id = ANY($1::text[]) ORDER BY id", [ids])).rows;
+    const by = new Map<string, CatalogStream[]>();
+    for (const s of streamRows) {
+      const list = by.get(s.channel_id as string) ?? [];
+      list.push({ id: Number(s.id), url: s.url as string, quality: opt(s.quality as string | null), status: s.status as CatalogStream["status"], latencyMs: opt(s.latency_ms as number | null) });
+      by.set(s.channel_id as string, list);
+    }
+    return rows.map((r) => ({
+      id: r.id as string, name: r.name as string, country: opt(r.country as string | null), languages: r.languages as string[],
+      categories: r.categories as string[], logoUrl: opt(r.logo_url as string | null), website: opt(r.website as string | null),
+      provenance: r.provenance as CatalogEntry["provenance"], status: r.status as CatalogEntry["status"], streams: by.get(r.id as string) ?? [],
+    }));
+  }
+
+  private catalogWhere(opts: CatalogFilter) {
+    const where = ["status='active'", "EXISTS (SELECT 1 FROM catalog_streams s WHERE s.channel_id=catalog_channels.id AND s.status<>'dead')"];
     const vals: unknown[] = [];
-    if (opts.q) { vals.push(`%${opts.q.replace(/[%_]/g, "")}%`); where.push(`name ILIKE $${vals.length}`); }
+    if (opts.q) { vals.push(`%${opts.q.replace(/[\\%_]/g, "")}%`); where.push(`name ILIKE $${vals.length}`); }
     if (opts.country) { vals.push(opts.country.toUpperCase()); where.push(`country=$${vals.length}`); }
     if (opts.category) { vals.push(JSON.stringify([opts.category.toLowerCase()])); where.push(`categories @> $${vals.length}::jsonb`); }
-    vals.push(Math.min(opts.limit ?? 50, 200));
-    const rows = (await this.db.query(`SELECT * FROM catalog_channels WHERE ${where.join(" AND ")} ORDER BY name LIMIT $${vals.length}`, vals)).rows;
+    if (opts.language) { vals.push(JSON.stringify([opts.language.toLowerCase()])); where.push(`languages @> $${vals.length}::jsonb`); }
+    return { sql: where.join(" AND "), vals };
+  }
+
+  async searchCatalog(opts: CatalogFilter & { limit?: number; offset?: number }) {
+    const { sql, vals } = this.catalogWhere(opts);
+    vals.push(Math.min(opts.limit ?? 50, 200), Math.max(opts.offset ?? 0, 0));
+    const rows = (await this.db.query(`SELECT * FROM catalog_channels WHERE ${sql} ORDER BY name, id LIMIT $${vals.length - 1} OFFSET $${vals.length}`, vals)).rows;
     return this.attachStreams(rows);
   }
+
+  async countCatalog(opts: CatalogFilter): Promise<number> {
+    const { sql, vals } = this.catalogWhere(opts);
+    return Number((await this.db.query<{ n: string }>(`SELECT count(*) AS n FROM catalog_channels WHERE ${sql}`, vals)).rows[0]?.n ?? 0);
+  }
+
+  async catalogFacets() {
+    const q = async (sql: string) => (await this.db.query<{ v: string; n: string }>(sql)).rows.map((r) => ({ value: r.v, count: Number(r.n) }));
+    const active = "status='active' AND EXISTS (SELECT 1 FROM catalog_streams s WHERE s.channel_id=catalog_channels.id AND s.status<>'dead')";
+    return {
+      countries: await q(`SELECT country AS v, count(*) AS n FROM catalog_channels WHERE ${active} AND country IS NOT NULL GROUP BY country ORDER BY country`),
+      categories: await q(`SELECT c AS v, count(*) AS n FROM catalog_channels, jsonb_array_elements_text(categories) c WHERE ${active} GROUP BY c ORDER BY c`),
+      languages: await q(`SELECT l AS v, count(*) AS n FROM catalog_channels, jsonb_array_elements_text(languages) l WHERE ${active} GROUP BY l ORDER BY l`),
+      total: await this.countCatalog({}),
+    };
+  }
+
+  /** Channels matching a filter, each with its single best stream (healthy, HTTPS first, fastest). */
+  async catalogForImport(opts: CatalogFilter & { limit: number }): Promise<{ id: string; name: string; logoUrl?: string; category?: string; streamUrl: string }[]> {
+    const { sql, vals } = this.catalogWhere(opts);
+    vals.push(opts.limit);
+    const rows = (await this.db.query(
+      `SELECT c.id, c.name, c.logo_url, c.categories->>0 AS category, best.url
+         FROM (SELECT * FROM catalog_channels WHERE ${sql} ORDER BY name, id LIMIT $${vals.length}) c
+         JOIN LATERAL (SELECT url FROM catalog_streams s WHERE s.channel_id=c.id AND s.status<>'dead'
+                       ORDER BY (s.status='ok') DESC, (s.url LIKE 'https:%') DESC, s.latency_ms NULLS LAST, s.id LIMIT 1) best ON true
+        ORDER BY c.name, c.id`, vals,
+    )).rows;
+    return rows.map((r) => ({ id: r.id as string, name: r.name as string, logoUrl: opt(r.logo_url as string | null), category: opt(r.category as string | null), streamUrl: r.url as string }));
+  }
+
   async getCatalogChannel(id: string) {
     const rows = (await this.db.query("SELECT * FROM catalog_channels WHERE id=$1", [id])).rows;
     return (await this.attachStreams(rows))[0];
@@ -235,7 +334,7 @@ export class Store {
   }
   async listStreamsToCheck(limit: number): Promise<{ id: number; url: string }[]> {
     const rows = (await this.db.query(
-      "SELECT s.id, s.url FROM catalog_streams s JOIN catalog_channels c ON c.id=s.channel_id WHERE c.status='active' ORDER BY s.last_checked_at NULLS FIRST LIMIT $1", [limit],
+      "SELECT s.id, s.url FROM catalog_streams s JOIN catalog_channels c ON c.id=s.channel_id WHERE c.status='active' ORDER BY s.last_checked_at NULLS FIRST, s.id LIMIT $1", [limit],
     )).rows;
     return rows.map((r) => ({ id: Number(r.id), url: r.url as string }));
   }

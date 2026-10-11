@@ -28,7 +28,7 @@ export function fakeFetcher(routes: Record<string, unknown>): SafeFetch & { call
 
 // PGlite takes ~3s to boot, so each test file boots it once and truncates between tests.
 let shared: Awaited<ReturnType<typeof openDb>> | undefined;
-const TABLES = "users, sessions, user_sources, user_channels, guide_channels, programmes, watch_events, catalog_streams, catalog_channels";
+const TABLES = "users, sessions, user_sources, user_channels, guide_channels, programmes, watch_events, catalog_streams, catalog_channels, sync_state";
 
 export async function makeApp(routes: Record<string, unknown> = {}, opts: { allowedOrigins?: string[] } = {}) {
   const db = (shared ??= await openDb({} as NodeJS.ProcessEnv));

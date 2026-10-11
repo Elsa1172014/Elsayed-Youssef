@@ -25,25 +25,39 @@ describe("xtream", () => {
 });
 
 describe("catalog", () => {
-  it("maps iptv-org data, skipping nsfw/closed and header-dependent streams", () => {
+  it("maps iptv-org data, skipping nsfw/closed/blocked/adult and header-dependent streams", () => {
     const channels = [
-      { id: "A.qa", name: "A", country: "QA", languages: ["ara"], categories: ["news"], website: "https://a.example" },
+      { id: "A.qa", name: "A", country: "QA", categories: ["news"], website: "https://a.example" },
       { id: "B.xx", name: "B", is_nsfw: true },
       { id: "C.xx", name: "C", closed: "2020-01-01" },
       { id: "D.xx", name: "D" },
       { id: "E.xx", name: "E" },
+      { id: "F.xx", name: "F", categories: ["xxx"] },
+      { id: "G.xx", name: "G" },
     ];
     const streams = [
       { channel: "A.qa", url: "https://a.example/live.m3u8", quality: "720p" },
       { channel: "A.qa", url: "https://a.example/live.m3u8" },
       { channel: "A.qa", url: "javascript:alert(1)" },
+      { channel: "A.qa", url: "rtmp://a.example/live" },
       { channel: "B.xx", url: "https://b.example/x.m3u8" },
       { channel: "C.xx", url: "https://c.example/x.m3u8" },
       { channel: "E.xx", url: "https://e.example/x.m3u8", referrer: "https://spoof" },
+      { channel: "F.xx", url: "https://f.example/x.m3u8" },
+      { channel: "G.xx", url: "https://g.example/x.m3u8" },
+      { channel: null, title: "Unlinked", url: "https://u.example/x.m3u8" },
     ];
-    const r = mapIptvOrg(channels, streams, [{ channel: "A.qa", url: "https://a.example/logo.png" }]);
+    const r = mapIptvOrg(channels, streams, {
+      logos: [
+        { channel: "A.qa", url: "https://a.example/small.png", in_use: true, width: 50 },
+        { channel: "A.qa", url: "https://a.example/logo.png", in_use: true, width: 300 },
+        { channel: "A.qa", url: "https://a.example/old.png", in_use: false, width: 900 },
+      ],
+      feeds: [{ channel: "A.qa", languages: ["ara"] }, { channel: "A.qa", languages: ["eng", "ara"] }],
+      blocklist: [{ channel: "G.xx", reason: "dmca" }],
+    });
     expect(r).toHaveLength(1);
-    expect(r[0]).toMatchObject({ id: "A.qa", provenance: "directory", logoUrl: "https://a.example/logo.png" });
+    expect(r[0]).toMatchObject({ id: "A.qa", provenance: "directory", logoUrl: "https://a.example/logo.png", languages: ["ara", "eng"] });
     expect(r[0]!.streams).toEqual([{ url: "https://a.example/live.m3u8", quality: "720p" }]);
     expect(mapIptvOrg(null, null)).toEqual([]);
   });

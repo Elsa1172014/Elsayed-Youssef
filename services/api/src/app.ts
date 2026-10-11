@@ -379,9 +379,37 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, allowedO
   });
 
   // ---- Free catalog (official / FAST / open directory) ----
-  app.get("/v1/catalog", async (req) => {
+  const filterOf = (q: Record<string, string | undefined>) => ({ q: q.q, country: q.country, category: q.category, language: q.language });
+
+  app.get("/v1/catalog", async (req, reply) => {
     const q = req.query as Record<string, string | undefined>;
-    return store.searchCatalog({ q: q.q, country: q.country, category: q.category, limit: Number(q.limit) || undefined });
+    const f = filterOf(q);
+    reply.header("x-total-count", await store.countCatalog(f));
+    return store.searchCatalog({ ...f, limit: Number(q.limit) || undefined, offset: Number(q.offset) || undefined });
+  });
+
+  app.get("/v1/catalog/facets", async () => store.catalogFacets());
+
+  /**
+   * Adds every catalog channel matching the filter to the caller's channels (best stream each), skipping ones
+   * already present. Users can then rename, hide, reorder or delete them like any other channel.
+   */
+  app.post("/v1/catalog/import", async (req, reply) => {
+    const b = body(req);
+    const f = filterOf(Object.fromEntries(["q", "country", "category", "language"].map((k) => [k, typeof b[k] === "string" ? (b[k] as string) : undefined])));
+    const limit = Number.isInteger(b.limit) && (b.limit as number) > 0 ? Math.min(b.limit as number, 20_000) : 1_000;
+    const uid = uidOf(req);
+    const have = new Set((await store.listChannels(uid)).map((c) => c.streamUrl));
+    let order = await store.nextSortOrder(uid);
+    let added = 0;
+    let skipped = 0;
+    for (const c of await store.catalogForImport({ ...f, limit })) {
+      if (have.has(c.streamUrl)) { skipped++; continue; }
+      have.add(c.streamUrl);
+      await store.addChannel({ userId: uid, name: c.name, streamUrl: c.streamUrl, logoUrl: c.logoUrl, group: c.category, sortOrder: order++, hidden: false });
+      added++;
+    }
+    return reply.code(201).send({ added, skipped });
   });
 
   app.post("/v1/catalog/:id/add", async (req, reply) => {

@@ -16,7 +16,10 @@ type Json = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
+const MAX_URL = 2048;
+
 function publicHttp(u: string | undefined): string | undefined {
+  if (u && u.length > MAX_URL) return undefined;
   try {
     const p = u ? new URL(u) : undefined;
     return p && (p.protocol === "https:" || p.protocol === "http:") ? p.toString() : undefined;
@@ -25,13 +28,26 @@ function publicHttp(u: string | undefined): string | undefined {
   }
 }
 
+export interface IptvOrgExtras {
+  /** logos.json: preferred in-use, widest logo per channel. */
+  logos?: unknown;
+  /** feeds.json: source of per-channel languages. */
+  feeds?: unknown;
+  /** blocklist.json: channels removed from the directory (takedowns, NSFW); always excluded. */
+  blocklist?: unknown;
+}
+
 /**
- * Maps the open iptv-org dataset (channels.json + streams.json) into catalog entries.
- * Skips NSFW and closed channels, and streams that need special request headers (user-agent/referrer
- * spoofing), keeping only plain public stream URLs. Channels with no usable stream are dropped.
+ * Maps the open iptv-org dataset (channels.json + streams.json, plus optional logos/feeds/blocklist)
+ * into catalog entries. Excluded: blocklisted, closed, NSFW/adult-category channels, streams that need
+ * special request headers (user-agent/referrer), non-HTTP(S) streams (not playable in a browser), and streams
+ * not linked to a vetted channel. Channels with no usable stream are dropped.
  */
-export function mapIptvOrg(channels: unknown, streams: unknown, logos?: unknown): CatalogChannel[] {
+export function mapIptvOrg(channels: unknown, streams: unknown, extras: IptvOrgExtras = {}): CatalogChannel[] {
   if (!Array.isArray(channels) || !Array.isArray(streams)) return [];
+  const blocked = new Set<string>();
+  if (Array.isArray(extras.blocklist)) for (const b of extras.blocklist as Json[]) if (str(b.channel)) blocked.add(str(b.channel)!);
+
   const byChannel = new Map<string, { url: string; quality?: string }[]>();
   for (const raw of streams as Json[]) {
     const id = str(raw.channel);
@@ -41,28 +57,45 @@ export function mapIptvOrg(channels: unknown, streams: unknown, logos?: unknown)
     if (!list.some((x) => x.url === url)) list.push({ url, quality: str(raw.quality) });
     byChannel.set(id, list);
   }
-  const logoBy = new Map<string, string>();
-  if (Array.isArray(logos)) {
-    for (const l of logos as Json[]) {
+
+  const logoBy = new Map<string, { url: string; score: number }>();
+  if (Array.isArray(extras.logos)) {
+    for (const l of extras.logos as Json[]) {
       const id = str(l.channel);
       const u = publicHttp(str(l.url));
-      if (id && u && !logoBy.has(id)) logoBy.set(id, u);
+      if (!id || !u) continue;
+      const score = (l.in_use === true ? 1_000_000 : 0) + (typeof l.width === "number" ? l.width : 0);
+      if (score > (logoBy.get(id)?.score ?? -1)) logoBy.set(id, { url: u, score });
     }
   }
+
+  const langBy = new Map<string, Set<string>>();
+  if (Array.isArray(extras.feeds)) {
+    for (const f of extras.feeds as Json[]) {
+      const id = str(f.channel);
+      if (!id) continue;
+      const set = langBy.get(id) ?? new Set<string>();
+      for (const l of strs(f.languages)) set.add(l);
+      langBy.set(id, set);
+    }
+  }
+
   const out: CatalogChannel[] = [];
   for (const raw of channels as Json[]) {
     const id = str(raw.id);
     const name = str(raw.name);
-    if (!id || !name || raw.is_nsfw === true || str(raw.closed)) continue;
+    if (!id || !name || blocked.has(id) || raw.is_nsfw === true || str(raw.closed)) continue;
+    const categories = strs(raw.categories);
+    if (categories.includes("xxx")) continue;
     const st = byChannel.get(id);
     if (!st?.length) continue;
     out.push({
       id,
       name,
       country: str(raw.country),
-      languages: strs(raw.languages),
-      categories: strs(raw.categories),
-      logoUrl: logoBy.get(id) ?? publicHttp(str(raw.logo)),
+      languages: [...(langBy.get(id) ?? [])],
+      categories,
+      logoUrl: logoBy.get(id)?.url ?? publicHttp(str(raw.logo)),
       website: publicHttp(str(raw.website)),
       provenance: "directory",
       streams: st,

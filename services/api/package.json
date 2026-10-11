@@ -9,18 +9,19 @@
     "test": "vitest run",
     "sync-iptv-org": "tsx src/jobs/cli.ts sync-iptv-org",
     "sync-official": "tsx src/jobs/cli.ts sync-official",
-    "check-health": "tsx src/jobs/cli.ts check-health"
+    "check-health": "tsx src/jobs/cli.ts check-health",
+    "worker": "tsx src/jobs/worker.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@receiver/core": "file:../../packages/core",
     "fastify": "^5.2.0",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
-    "tsx": "^4.19.0",
     "typescript": "~5.8.2",
     "vitest": "^5.0.3"
   }
