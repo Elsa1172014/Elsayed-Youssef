@@ -6,3 +6,8 @@ export * from "./text";
 export * from "./search";
 export * from "./recommend";
 export * from "./epgMap";
+export * from "./xtream";
+export * from "./catalog";
+export * from "./health";
+export * from "./epgMerge";
+export * from "./embeddings";
