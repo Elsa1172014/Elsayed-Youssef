@@ -19,6 +19,8 @@ async function relayReason(proxyUrl: string): Promise<string> {
  */
 export function Player({ channelId, onWatched }: { channelId: string; onWatched: (seconds: number) => void }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [theater, setTheater] = useState(false);
   const [error, setError] = useState("");
   const [via, setVia] = useState<"" | "direct" | "relay">("");
 
@@ -83,9 +85,28 @@ export function Player({ channelId, onWatched }: { channelId: string; onWatched:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId]);
 
+  const fullscreen = () => {
+    const el = box.current as (HTMLDivElement & { webkitRequestFullscreen?: () => void }) | null;
+    const v = ref.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else if (el?.requestFullscreen) void el.requestFullscreen().catch(() => setTheater(true));
+    else if (v?.webkitEnterFullscreen) v.webkitEnterFullscreen(); // iPhone Safari only fullscreens the <video>
+    else setTheater((t) => !t);
+  };
+  useEffect(() => {
+    if (!theater) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setTheater(false);
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [theater]);
+
   return (
-    <div className="player">
-      <video ref={ref} controls autoPlay playsInline />
+    <div className={theater ? "player theater" : "player"} ref={box}>
+      <video ref={ref} controls autoPlay playsInline onDoubleClick={fullscreen} />
+      <div className="fs">
+        <button type="button" onClick={() => setTheater((t) => !t)} aria-label="Wide view" title="Wide view">▭</button>
+        <button type="button" onClick={fullscreen} aria-label="Fullscreen" title="Fullscreen">⛶</button>
+      </div>
       {error ? <p className="error">{error}</p> : via === "relay" && <p className="hint">via relay</p>}
     </div>
   );
