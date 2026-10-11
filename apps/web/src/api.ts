@@ -148,6 +148,12 @@ export const api = {
   },
   importM3U: (content: string, name?: string) => call<{ imported: number }>("/v1/me/playlists/import", json("POST", { content, name, ownershipAttested: true })),
   importEpg: (content: string) => call<{ programmes: number }>("/v1/me/epg/import", json("POST", { content })),
+  exportCatalogM3U: async (f: CatalogFilter) => {
+    const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v) as [string, string][]);
+    const res = await fetch(`${base}/v1/catalog/export.m3u?${qs}`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    return res.text();
+  },
   exportM3U: async () => {
     const res = await fetch(`${base}/v1/me/playlists/export.m3u`, { headers: { authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`Export failed (${res.status})`);
@@ -192,7 +198,7 @@ export const api = {
   aiSummary: (channelId: string, lang: string) => call<{ summary: string; ai: boolean }>(`/v1/ai/channels/${channelId}/summary`, json("POST", { lang })),
   aiTranslate: (text: string, to: string) => call<{ text: string }>("/v1/ai/translate", json("POST", { text, to })),
   similar: (channelId: string) => call<{ id: string; score: number }[]>(`/v1/me/channels/${channelId}/similar`),
-  importCatalog: (f: CatalogFilter, limit = 20000) => call<{ added: number; skipped: number }>("/v1/catalog/import", json("POST", { ...f, limit })),
+  importCatalog: (f: CatalogFilter, name?: string, limit = 20000) => call<{ added: number; skipped: number }>("/v1/catalog/import", json("POST", { ...f, name, limit })),
   addFromCatalog: (id: string) => call<Channel>(`/v1/catalog/${encodeURIComponent(id)}/add`, json("POST")),
   clearHistory: () => call<void>("/v1/me/watch-events", json("DELETE")),
 };

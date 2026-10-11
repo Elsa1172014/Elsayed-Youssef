@@ -144,6 +144,43 @@ describe("Europe filter", () => {
   });
 });
 
+describe("catalog import as a named group", () => {
+  it("puts imported channels into a source named by the client, reusing it on re-import", async () => {
+    const { app, db } = await makeApp();
+    await db.query(`INSERT INTO catalog_channels (id,name,country,categories,provenance) VALUES ('a','ON Sport','EG','["sports"]','fta'),('b','Nile News','EG','["news"]','fta')`);
+    await db.query(`INSERT INTO catalog_streams (channel_id,url) SELECT id, 'https://x.example/'||id||'.m3u8' FROM catalog_channels`);
+    const post = (payload: object) => app.inject({ method: "POST", url: "/v1/catalog/import", headers: alice, payload });
+    const r = (await post({ category: "sports", name: "iptv-org · sports" })).json();
+    expect(r.added).toBe(1);
+    const chans = (await app.inject({ url: "/v1/me/channels", headers: alice })).json();
+    expect(chans[0].sourceId).toBe(r.sourceId);
+    const again = (await post({ category: "sports", name: "iptv-org · sports" })).json();
+    expect(again.added).toBe(0);
+    expect(again.sourceId).toBe(r.sourceId);
+    const empty = (await post({ category: "kids", name: "iptv-org · kids" })).json();
+    expect(empty.added).toBe(0);
+    const names = (await app.inject({ url: "/v1/me/sources", headers: alice })).json().map((x: { name: string }) => x.name);
+    expect(names).toEqual(["iptv-org · sports"]);
+  });
+});
+
+describe("catalog M3U download", () => {
+  it("exports the filtered catalog as an M3U with one live stream per channel", async () => {
+    const { app, db } = await makeApp();
+    await db.query(`INSERT INTO catalog_channels (id,name,country,categories,provenance) VALUES
+      ('a','ON Sport','EG','["sports"]','fta'),('b','Nile News','EG','["news"]','fta'),('c','BBC Sport','GB','["sports"]','fta'),('d','Dead Sport','EG','["sports"]','fta')`);
+    await db.query(`INSERT INTO catalog_streams (channel_id,url,status) SELECT id, 'https://x.example/'||id||'.m3u8', CASE WHEN id='d' THEN 'dead' ELSE 'unknown' END FROM catalog_channels`);
+    const r = await app.inject({ url: "/v1/catalog/export.m3u?arabic=1&category=sports", headers: alice });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers["content-type"]).toContain("mpegurl");
+    expect(r.body).toContain("ON Sport");
+    expect(r.body).toContain("https://x.example/a.m3u8");
+    expect(r.body).not.toContain("Nile News");
+    expect(r.body).not.toContain("BBC Sport");
+    expect(r.body).not.toContain("Dead Sport");
+  });
+});
+
 describe("persistence", () => {
   it("keeps channels, sources and settings across sign-out, sign-in and a fresh server instance", async () => {
     const M3U = "#EXTM3U\n" + Array.from({ length: 1200 }, (_, i) => `#EXTINF:-1 group-title="News",Chan ${i}\nhttps://p.example/${i}.m3u8`).join("\n");
