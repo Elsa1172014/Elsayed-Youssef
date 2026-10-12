@@ -1,0 +1,4 @@
+{
+  "_note": "Licensed/own vertical episodes only. Empty on purpose: no title is listed unless you own or hold the rights to it. Each series: {id,title,synopsis,language,license,poster?,episodes:[{n,title,src(mp4 https URL),runtimeSec}]}",
+  "series": []
+}

@@ -1,0 +1,20 @@
+:root{--bg:#0b0d12;--card:#151924;--fg:#eef1f7;--mute:#9aa3b5;--acc:#e5484d;--ok:#3fb950;--warn:#d29922}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,"Segoe UI",Tahoma,sans-serif}
+.top{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;position:sticky;top:0;background:var(--bg);z-index:5}
+.brand{font-weight:700;letter-spacing:.04em}.logo{color:var(--acc)}
+.btn{background:var(--card);color:var(--fg);border:1px solid #2a3040;border-radius:10px;padding:8px 14px;cursor:pointer;font:inherit}
+.btn:focus-visible,.nav a:focus-visible,.card a:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.nav{display:flex;gap:8px;overflow-x:auto;padding:0 16px 12px;scrollbar-width:none}
+.nav a{white-space:nowrap;padding:8px 14px;border-radius:999px;background:var(--card);color:var(--fg);text-decoration:none;font-size:14px}
+.nav a.on{background:var(--acc)}.nav a.soon{opacity:.55}
+main{padding:8px 16px 48px;max-width:1100px;margin:auto}
+h1{font-size:22px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.card{background:var(--card);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.card h3{margin:0}.tag{font-size:12px;border-radius:6px;padding:2px 8px;background:#222838;color:var(--mute);width:fit-content}
+.tag.warn{color:var(--warn)}.note{background:#1b2030;border-radius:12px;padding:12px 14px;color:var(--mute);font-size:14px}
+.card a.go{margin-top:auto;text-align:center;background:var(--acc);color:#fff;padding:10px;border-radius:10px;text-decoration:none}
+input[type=search]{width:100%;padding:12px;border-radius:10px;border:1px solid #2a3040;background:var(--card);color:var(--fg);font:inherit;margin:8px 0 14px}
+.reel{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory}
+.reel video{height:70vh;max-height:640px;aspect-ratio:9/16;background:#000;border-radius:14px;scroll-snap-align:center;flex:none}
+.fav{background:none;border:0;color:var(--mute);font-size:22px;cursor:pointer;align-self:flex-end}.fav.on{color:var(--acc)}
+[hidden]{display:none!important}

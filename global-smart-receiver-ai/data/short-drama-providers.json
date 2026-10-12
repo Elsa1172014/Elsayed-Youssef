@@ -1,0 +1,10 @@
+{
+  "_note": "Directory of official short-drama (micro-drama) platforms. Entries link to the provider's own site only; no content is embedded or re-streamed. 'verified' = whether the URL/availability was actually checked by this project. None has been verified yet (build sandbox has no outbound access to these hosts) — run `node scripts/check-links.mjs` from a normal network before publishing.",
+  "providers": [
+    { "id": "reelshort", "name": "ReelShort", "url": "https://www.reelshort.com/", "model": "freemium", "languages": ["en", "es", "fr", "de", "pt", "ar"], "verified": false },
+    { "id": "dramabox", "name": "DramaBox", "url": "https://www.dramaboxapp.com/", "model": "freemium", "languages": ["en", "es", "ar", "id", "pt"], "verified": false },
+    { "id": "shortmax", "name": "ShortMax", "url": "https://www.shortmax.tv/", "model": "freemium", "languages": ["en", "es", "pt"], "verified": false },
+    { "id": "goodshort", "name": "GoodShort", "url": "https://www.goodshort.com/", "model": "freemium", "languages": ["en", "es", "pt"], "verified": false },
+    { "id": "flextv", "name": "FlexTV", "url": "https://www.flextv.cc/", "model": "freemium", "languages": ["en", "es", "pt"], "verified": false }
+  ]
+}
