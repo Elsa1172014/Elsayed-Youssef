@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>منصة المحكّات المعيارية</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="توليد محكّات التقييم الذاتي من الهدف التعليمي وتنزيلها قصاصات Word جاهزة للقص.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+<style>
+[hidden]{display:none!important}
+body{margin:0}
+img{max-width:100%}
+
+/* Layout: one centered column — input panel on top, editable rubric table below, export bar last. */
+:root{
+  --bg:#f6f4f8; --surface:#ffffff; --fg:#241a2e; --muted:#6b5f78; --line:#ddd5e6;
+  --accent:#5e3a87; --accent-fg:#ffffff; --focus:#b07ad8; --err:#b3261e;
+  --font:'IBM Plex Sans Arabic','Segoe UI',Tahoma,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#17121d; --surface:#211a2a; --fg:#f0eaf5; --muted:#a99bb8; --line:#3a2f47;
+  --accent:#a46bd1; --accent-fg:#16101c; --focus:#c79cea; --err:#ff8a80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#17121d; --surface:#211a2a; --fg:#f0eaf5; --muted:#a99bb8; --line:#3a2f47;
+  --accent:#a46bd1; --accent-fg:#16101c; --focus:#c79cea; --err:#ff8a80; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;line-height:1.7;
+  padding-inline:16px;padding-block:28px}
+.wrap{max-width:1100px;margin-inline:auto;display:flex;flex-direction:column;gap:22px}
+h1{font-size:1.7rem;line-height:1.3;margin:0;font-weight:700;text-wrap:balance}
+.lead{color:var(--muted);margin:4px 0 0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;
+  display:flex;flex-direction:column;gap:14px}
+label{font-weight:600;font-size:.95rem}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.row{grid-template-columns:1fr}}
+select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+textarea,input[type=text]{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;padding:10px 12px;width:100%}
+textarea{min-height:96px;resize:vertical}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button{font:inherit;font-weight:600;border-radius:8px;padding:10px 20px;cursor:pointer;border:1px solid var(--accent)}
+.primary{background:var(--accent);color:var(--accent-fg)}
+.ghost{background:transparent;color:var(--accent)}
+button:disabled{opacity:.55;cursor:wait}
+.check{display:flex;align-items:center;gap:8px;font-weight:500}
+.status{color:var(--muted);font-size:.92rem}
+.status.err{color:var(--err)}
+.note{display:inline-block;font-size:.8rem;font-weight:600;color:var(--accent);border:1px solid var(--accent);
+  border-radius:999px;padding:0 10px}
+.sheet-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center}
+.sheet-head h2{margin:0;font-size:1.15rem}
+.scroll{overflow-x:auto;border-radius:6px}
+table.rubric{border-collapse:collapse;width:100%;min-width:860px;table-layout:fixed;color:#000;background:#fff}
+.rubric th,.rubric td{border:1px solid #000;padding:8px 10px;vertical-align:middle;font-size:.95rem;line-height:1.65}
+.rubric th{font-weight:600;text-align:center}
+.rubric td[contenteditable]{text-align:justify}
+.rubric td.crit{background:#5e3a87;color:#fff;font-weight:700;text-align:center;width:16%}
+.rubric th.h-crit{background:#5e3a87;color:#fff;width:16%}
+.rubric th.h-adv{background:#2e7d5b;color:#fff}
+.rubric th.h-pro{background:#f0c75e;color:#3a2e00}
+.rubric th.h-dev{background:#e39a52;color:#3b1f00}
+.rubric th.h-beg{background:#c0504d;color:#fff}
+.rubric .adv{background:#e3f2e9}.rubric .pro{background:#fff5d6}.rubric .dev{background:#fce8d5}.rubric .beg{background:#f9e1df}
+.rubric td[contenteditable]:focus-visible{outline:3px solid #5e3a87;outline-offset:-3px}
+.sep{width:100%;height:0;border:0;border-top:2px dashed var(--line);margin:6px 0}
+#parts{display:flex;flex-direction:column;gap:12px}
+.history{display:flex;flex-direction:column;gap:10px}
+.item{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.item.cur{border-color:var(--accent)}
+.item .txt{min-width:0;flex:1 1 320px}
+.item .goal{margin:0;font-weight:600;overflow-wrap:anywhere}
+.item .meta{margin:2px 0 0;color:var(--muted);font-size:.85rem}
+.item .btns{display:flex;gap:8px}
+.item button{padding:6px 14px;font-size:.9rem}
+.empty{color:var(--muted);margin:0}
+.hint{color:var(--muted);font-size:.88rem;margin:0}
+
+.login{max-width:420px;margin-inline:auto}
+.login .field{margin-bottom:4px}
+.topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.who{color:var(--muted);font-size:.92rem;margin:0}
+.linkbtn{background:none;border:none;color:var(--accent);text-decoration:underline;padding:0;font-weight:500;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div>
+      <h1>منصة المحكّات المعيارية</h1>
+      <p class="lead">اكتب الهدف التعليمي، فتُنتج المنصة 3 محكّات للتقييم الذاتي بصيغة المتكلم وبأربعة مستويات لتحقيق الهدف. عدّل ما تشاء ثم نزّل ورقة A4 مقسّمة إلى قصاصات جاهزة للقص.</p>
+    </div>
+    <p class="who" id="who" hidden><span id="whoName"></span> · <button class="linkbtn" id="logout" type="button">خروج</button></p>
+  </header>
+
+  <section class="panel login" id="loginPanel" aria-label="الدخول">
+    <div class="field">
+      <label for="tname">اسمك</label>
+      <input type="text" id="tname" autocomplete="name" placeholder="مثال: أ. سارة">
+    </div>
+    <div class="field">
+      <label for="tcode">رمز الدخول</label>
+      <input type="password" id="tcode" autocomplete="current-password" placeholder="الرمز الذي سلّمه لك رئيس القسم">
+    </div>
+    <div class="actions">
+      <button class="primary" id="loginBtn" type="button">دخول</button>
+      <span class="status" id="loginStatus" role="status"></span>
+    </div>
+  </section>
+
+  <main id="app" hidden>
+    <section class="panel" aria-label="مدخلات الهدف">
+      <div class="field">
+        <label for="goal">الهدف التعليمي</label>
+        <textarea id="goal" maxlength="600" placeholder="مثال: أن يقيّم الطالب حجة الكاتب ويحدد مواضع القوة والضعف مع الاستدلال بقرائن نصية من الفقرات."></textarea>
+      </div>
+      <div class="actions">
+        <button class="primary" id="gen" type="button">توليد المحكّات</button>
+        <span class="status" id="status" role="status"></span>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="جدول المحكّات">
+      <div class="sheet-head">
+        <h2>جدول التقييم <span class="note" id="exampleNote">نموذج توضيحي</span></h2>
+      </div>
+      <div id="parts"></div>
+      <p class="hint">اضغط على أي خلية لتعديل النص مباشرة؛ التعديلات تنتقل إلى الملف. في الملف تُرصّ القصاصات فوق بعضها بلا فراغات، بنصف سم بينها لخط القص، ويتحدد عددها في الورقة تلقائيًا.</p>
+      <div class="actions">
+        <button class="ghost" id="save" type="button" hidden>حفظ التعديلات</button>
+        <button class="primary" id="dl" type="button">تنزيل ورقة القصاصات (Word)</button>
+        <span class="status" id="dlStatus" role="status"></span>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="مكتبة الأهداف">
+      <div class="sheet-head">
+        <h2>مكتبة الأهداف المحفوظة</h2>
+        <label class="check"><input type="checkbox" id="mineOnly"> أهدافي فقط</label>
+      </div>
+      <div id="history" class="history"></div>
+    </section>
+  </main>
+</div>
+
+<script src="vendor/jszip.min.js"></script>
+<script>
+(function(){
+  var LEVELS=['advanced','proficient','developing','beginner'];
+  var CLS={advanced:'adv',proficient:'pro',developing:'dev',beginner:'beg'};
+  var HEAD={advanced:'متقدّم جدًّا',proficient:'متقن',developing:'نامٍ',beginner:'مبتدئ'};
+  var HEAD_FILL={advanced:'2E7D5B',proficient:'F0C75E',developing:'E39A52',beginner:'C0504D'};
+  var HEAD_TXT={advanced:'FFFFFF',proficient:'3A2E00',developing:'3B1F00',beginner:'FFFFFF'};
+  var T={advanced:'E3F2E9',proficient:'FFF5D6',developing:'FCE8D5',beginner:'F9E1DF'}; var BODY_FILL=[T,T];
+
+  var state={title:'',criteria:[
+    {name:'تقييم حجة الكاتب',
+     advanced:'أقيّم حجة الكاتب بعمق، فأحدّد دعواه وأدلته، وأحكم على مدى اتساقها وإقناعها بتعليل واضح.',
+     proficient:'أقيّم حجة الكاتب بصورة صحيحة، فأحدّد دعواه وأدلته، وأبدي حكمًا مناسبًا على مدى إقناعها.',
+     developing:'أحدّد دعوى الكاتب وبعض أدلته، وأبدي حكمًا على حجته بالطريقة التي تناسب مستواي.',
+     beginner:'أحدّد دعوى الكاتب، وأعبّر عن رأيي في حجته بالطريقة التي تناسب مستواي.'},
+    {name:'تحديد مواضع القوة والضعف',
+     advanced:'أحدّد مواضع القوة والضعف في الحجة بدقة، وأفسّر سبب كل موضع، وأقارن بينها لأصل إلى تقدير شامل لقيمة الحجة.',
+     proficient:'أحدّد مواضع القوة والضعف الرئيسة في الحجة بصورة صحيحة، وأوضّح سبب كل موضع.',
+     developing:'أحدّد موضع قوة وموضع ضعف في الحجة، وأذكر سببًا لكل منهما بالطريقة التي تناسب مستواي.',
+     beginner:'أحدّد موضع قوة أو موضع ضعف في الحجة بالطريقة التي تناسب مستواي.'},
+    {name:'الاستدلال بقرائن نصية من الفقرات',
+     advanced:'أستشهد بقرائن دقيقة من فقرات متنوعة تدعم كل حكم أصدره، وأحلّل صلة كل قرينة بالحكم.',
+     proficient:'أستشهد بقرائن مناسبة من الفقرات تدعم أحكامي، وأبيّن صلتها بها.',
+     developing:'أستشهد بقرينة من الفقرات تدعم بعض أحكامي بالطريقة التي تناسب مستواي.',
+     beginner:'أذكر قرينة من الفقرات تتصل بأحد أحكامي بالطريقة التي تناسب مستواي.'}
+  ]};
+  // stage 1 = first criterion; stage 2 = second and third
+  var PARTS=[{from:0,to:1},{from:1,to:3}];
+
+  var $=function(id){return document.getElementById(id)};
+  var parts=$('parts');
+  var HCLS={advanced:'h-adv',proficient:'h-pro',developing:'h-dev',beginner:'h-beg'};
+  function render(){
+    parts.textContent='';
+    PARTS.forEach(function(P){
+      if(P.from>0){var hr0=document.createElement('hr'); hr0.className='sep'; parts.appendChild(hr0);}
+      var wrap=document.createElement('div'); wrap.className='scroll';
+      var t=document.createElement('table'); t.className='rubric';
+      var thead=document.createElement('thead'), hr=document.createElement('tr');
+      var c0=document.createElement('th'); c0.className='h-crit'; c0.textContent='المحكّات المعيارية'; hr.appendChild(c0);
+      LEVELS.forEach(function(k){var th=document.createElement('th'); th.className=HCLS[k]; th.textContent=HEAD[k]; hr.appendChild(th)});
+      thead.appendChild(hr); t.appendChild(thead);
+      var tb=document.createElement('tbody');
+      state.criteria.slice(P.from,P.to).forEach(function(c,i){
+        var tr=document.createElement('tr'); tr.className='r'+(i%2?'2':'1');
+        var th=document.createElement('td'); th.className='crit'; th.contentEditable='true';
+        th.textContent=c.name; th.addEventListener('input',function(){c.name=th.textContent});
+        tr.appendChild(th);
+        LEVELS.forEach(function(k){
+          var td=document.createElement('td'); td.className=CLS[k]; td.contentEditable='true';
+          td.textContent=c[k]; td.addEventListener('input',function(){c[k]=td.textContent});
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); wrap.appendChild(t); parts.appendChild(wrap);
+    });
+  }
+  render();
+
+  // ---------- Session ----------
+  var teacher='', code='', curId=null, saved=[], pendingDel=null;
+  function lsGet(k){try{return localStorage.getItem(k)||''}catch(e){return ''}}
+  function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function lsDel(k){try{localStorage.removeItem(k)}catch(e){}}
+  function setStatus(el,msg,err){el.textContent=msg;el.className='status'+(err?' err':'')}
+  function clone(o){return JSON.parse(JSON.stringify(o))}
+  function fmt(ts){try{return new Date(ts).toLocaleDateString('ar-AE',{year:'numeric',month:'long',day:'numeric'})}catch(e){return ''}}
+  function owns(g){return g.teacher===teacher}
+
+  async function api(path,opts){
+    opts=opts||{};
+    var r=await fetch(path,{method:opts.method||'GET',headers:{'Content-Type':'application/json','x-access-code':encodeURIComponent(code),'x-teacher':encodeURIComponent(teacher)},body:opts.body?JSON.stringify(opts.body):undefined});
+    var j={}; try{j=await r.json()}catch(e){}
+    if(!r.ok){var err=new Error(j.error||'تعذّر تنفيذ الطلب.'); err.status=r.status; throw err;}
+    return j;
+  }
+
+  function showApp(on){
+    $('loginPanel').hidden=on; $('app').hidden=!on; $('who').hidden=!on;
+    if(on) $('whoName').textContent=teacher;
+  }
+
+  async function login(name,pass,silent){
+    teacher=name.trim(); code=pass;
+    if(!teacher||!code){ if(!silent) setStatus($('loginStatus'),'اكتب اسمك ورمز الدخول.',true); return false; }
+    try{
+      await api('/api/login',{method:'POST'});
+      lsSet('rb_teacher',teacher); lsSet('rb_code',code);
+      showApp(true); loadGoals(); return true;
+    }catch(e){
+      if(!silent) setStatus($('loginStatus'),e.status===401?'رمز الدخول غير صحيح.':e.message,true);
+      if(e.status===401){lsDel('rb_code')}
+      return false;
+    }
+  }
+  $('loginBtn').addEventListener('click',function(){login($('tname').value,$('tcode').value,false)});
+  $('tcode').addEventListener('keydown',function(e){if(e.key==='Enter')$('loginBtn').click()});
+  $('logout').addEventListener('click',function(){lsDel('rb_code'); code=''; showApp(false); $('tcode').value=''});
+  $('tname').value=lsGet('rb_teacher');
+  if(lsGet('rb_teacher')&&lsGet('rb_code')) login(lsGet('rb_teacher'),lsGet('rb_code'),true);
+
+  // ---------- Generate ----------
+  var genBtn=$('gen'), status=$('status');
+  genBtn.addEventListener('click',async function(){
+    var goal=$('goal').value.trim();
+    if(goal.length<8){setStatus(status,'اكتب الهدف التعليمي كاملًا.',true);return}
+    genBtn.disabled=true; setStatus(status,'جارٍ توليد المحكّات… قد يستغرق ذلك نصف دقيقة.');
+    try{
+      var r=await api('/api/generate',{method:'POST',body:{goal:goal}});
+      state.criteria=r.goal.criteria; curId=r.goal.id; $('exampleNote').hidden=true;
+      render(); setSaveUi(); loadGoals();
+      setStatus(status,'تم التوليد وحُفظ الهدف في المكتبة. راجع الصياغات وعدّلها عند الحاجة.');
+    }catch(e){
+      if(e.status===401){showApp(false)}
+      setStatus(status,e.message,true);
+    }finally{genBtn.disabled=false}
+  });
+
+  // ---------- Saved goals ----------
+  var saveBtn=$('save'), histEl=$('history'), mineOnly=$('mineOnly');
+  function curGoal(){return saved.filter(function(g){return g.id===curId})[0]}
+  function setSaveUi(){var c=curGoal(); saveBtn.hidden=!(c&&owns(c))}
+  async function saveEdits(){
+    var c=curGoal(); if(!(c&&owns(c))) return false;
+    try{ var r=await api('/api/goals',{method:'PATCH',body:{id:curId,criteria:state.criteria}}); c.criteria=r.goal.criteria; return true }
+    catch(e){ return false }
+  }
+  saveBtn.addEventListener('click',async function(){
+    var ok=await saveEdits();
+    setStatus($('dlStatus'),ok?'تم حفظ التعديلات في المكتبة.':'تعذّر الحفظ.',!ok);
+  });
+  mineOnly.addEventListener('change',renderHistory);
+  async function loadGoals(){
+    try{ saved=(await api('/api/goals')).goals||[]; }catch(e){ if(e.status===401) showApp(false); }
+    renderHistory(); setSaveUi();
+  }
+  function renderHistory(){
+    histEl.textContent='';
+    var list=saved.filter(function(g){return !mineOnly.checked||owns(g)});
+    if(!list.length){
+      var e=document.createElement('p'); e.className='empty';
+      e.textContent=mineOnly.checked?'لم تحفظ أي هدف بعد. اكتب هدفًا واضغط «توليد المحكّات» فيُحفظ هنا.':'لا توجد أهداف محفوظة بعد. اكتب هدفًا واضغط «توليد المحكّات» فيُحفظ هنا.';
+      histEl.appendChild(e); return;
+    }
+    list.forEach(function(g){
+      var it=document.createElement('div'); it.className='item'+(g.id===curId?' cur':'');
+      var tx=document.createElement('div'); tx.className='txt';
+      var p1=document.createElement('p'); p1.className='goal'; p1.textContent=g.goal; tx.appendChild(p1);
+      var p2=document.createElement('p'); p2.className='meta'; p2.textContent=(owns(g)?'أنا':g.teacher)+' · '+fmt(g.createdAt); tx.appendChild(p2);
+      var bt=document.createElement('div'); bt.className='btns';
+      var open=document.createElement('button'); open.type='button'; open.className='ghost'; open.textContent='فتح';
+      open.addEventListener('click',function(){
+        $('goal').value=g.goal; state.criteria=clone(g.criteria); curId=g.id; $('exampleNote').hidden=true;
+        render(); renderHistory(); setSaveUi(); setStatus(status,'تم فتح الهدف المحفوظ.'); window.scrollTo({top:0,behavior:'smooth'});
+      });
+      bt.appendChild(open);
+      if(owns(g)){
+        var del=document.createElement('button'); del.type='button'; del.className='ghost';
+        del.textContent=pendingDel===g.id?'تأكيد الحذف':'حذف';
+        del.addEventListener('click',async function(){
+          if(pendingDel!==g.id){pendingDel=g.id; renderHistory(); return}
+          pendingDel=null;
+          try{ await api('/api/goals?id='+encodeURIComponent(g.id),{method:'DELETE'}); if(curId===g.id) curId=null; await loadGoals(); }
+          catch(x){ setStatus(status,x.message,true); renderHistory(); }
+        });
+        bt.appendChild(del);
+      }
+      it.appendChild(tx); it.appendChild(bt); histEl.appendChild(it);
+    });
+  }
+
+  // ---------- Word export (raw WordprocessingML, RTL) ----------
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  var FONT='<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>';
+  function run(text,o){
+    o=o||{};
+    return '<w:r><w:rPr>'+FONT+(o.bold?'<w:b/><w:bCs/>':'')+
+      '<w:color w:val="'+(o.color||'000000')+'"/><w:sz w:val="'+(o.sz||22)+'"/><w:szCs w:val="'+(o.sz||22)+'"/><w:rtl/></w:rPr>'+
+      '<w:t xml:space="preserve">'+esc(text)+'</w:t></w:r>';
+  }
+  function para(text,o){
+    o=o||{};
+    return '<w:p><w:pPr><w:bidi/><w:spacing w:before="0" w:after="0" w:line="276" w:lineRule="auto"/><w:jc w:val="'+(o.jc||'center')+'"/></w:pPr>'+run(text,o)+'</w:p>';
+  }
+  function cell(w,fill,inner){
+    return '<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="'+fill+'"/><w:vAlign w:val="center"/></w:tcPr>'+inner+'</w:tc>';
+  }
+  var BORD=function(v,sz,c){return ['top','left','bottom','right','insideH','insideV'].map(function(x){return '<w:'+x+' w:val="'+v+'" w:sz="'+sz+'" w:space="0" w:color="'+c+'"/>'}).join('')};
+  var TINY='<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr><w:r><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:r></w:p>';
+  var GAP=284; // 0.5 cm between slips, with a dashed cut line in the middle
+  var PW=11906, PH=16838, M=567, W=PW-2*M, AVAIL=PH-2*M-300;
+  // row heights are computed from the text, so a slip's height is known and slips can be packed tightly
+  function rowH(data,sz,mar){
+    var c0=Math.round(W*0.16), c=Math.floor((W-c0)/4), lh=sz*10*1.4, cw=sz*10*0.5;
+    function lines(t,w){return Math.max(1,Math.ceil(String(t).length/Math.max(4,Math.floor((w-2*mar)/cw))))}
+    function h(n){return Math.ceil(n*lh+2*mar+20)}
+    var hs=[h(lines('المحكّات المعيارية',c0))];
+    data.forEach(function(cr){
+      var n=lines(cr.name,c0);
+      LEVELS.forEach(function(k){n=Math.max(n,lines(cr[k],c))});
+      hs.push(h(n));
+    });
+    return hs;
+  }
+  function sum(a){return a.reduce(function(x,y){return x+y},0)}
+  function slip(sz,mar,data){
+    var c0=Math.round(W*0.16), c=Math.floor((W-c0)/4), cw=[c0,c,c,c,c], hs=rowH(data,sz,mar);
+    var tr=function(h){return '<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="'+h+'" w:hRule="exact"/></w:trPr>'};
+    var b='<w:tbl><w:tblPr><w:bidiVisual/><w:tblW w:w="'+W+'" w:type="dxa"/><w:tblBorders>'+BORD('single',4,'000000')+'</w:tblBorders>'+
+      '<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="'+mar+'" w:type="dxa"/><w:left w:w="'+mar+'" w:type="dxa"/><w:bottom w:w="'+mar+'" w:type="dxa"/><w:right w:w="'+mar+'" w:type="dxa"/></w:tblCellMar></w:tblPr>'+
+      '<w:tblGrid>'+cw.map(function(w){return '<w:gridCol w:w="'+w+'"/>'}).join('')+'</w:tblGrid>';
+    b+=tr(hs[0])+cell(cw[0],'5E3A87',para('المحكّات المعيارية',{bold:true,color:'FFFFFF',sz:sz}));
+    LEVELS.forEach(function(k,i){b+=cell(cw[i+1],HEAD_FILL[k],para(HEAD[k],{bold:true,color:HEAD_TXT[k],sz:sz}))});
+    b+='</w:tr>';
+    data.forEach(function(cr,r){
+      var f=BODY_FILL[r%2];
+      b+=tr(hs[r+1])+cell(cw[0],'5E3A87',para(cr.name,{bold:true,color:'FFFFFF',sz:sz}));
+      LEVELS.forEach(function(k,i){b+=cell(cw[i+1],f[k],para(cr[k],{jc:'both',sz:sz}))});
+      b+='</w:tr>';
+    });
+    return b+'</w:tbl>';
+  }
+  function slipH(sz,mar,data){return sum(rowH(data,sz,mar))+6}
+  function perPage(h){return Math.max(1,Math.floor((AVAIL+GAP)/(h+GAP)))}
+  // dashed cut line centred in a 0.5 cm gap
+  var CUT='<w:p><w:pPr><w:pBdr><w:bottom w:val="dashed" w:sz="6" w:space="0" w:color="808080"/></w:pBdr><w:spacing w:before="0" w:after="0" w:line="'+(GAP/2)+'" w:lineRule="exact"/></w:pPr><w:r><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:r></w:p>'+
+    '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="'+(GAP/2)+'" w:lineRule="exact"/></w:pPr><w:r><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:r></w:p>';
+  var SETS=function(){return [state.criteria.slice(0,1),state.criteria.slice(1,3)]};
+  // largest font that still gives at least 6 slips on the first sheet and 3 on the second
+  function chooseSize(){
+    var sets=SETS(), mar=50;
+    for(var sz=22;sz>=20;sz-=2){
+      if(perPage(slipH(sz,mar,sets[0]))>=6 && perPage(slipH(sz,mar,sets[1]))>=3) return sz;
+    }
+    return 20;
+  }
+  function pack(data,sz,mar){
+    var n=perPage(slipH(sz,mar,data)), out=[];
+    for(var i=0;i<n;i++){out.push(slip(sz,mar,data)); if(i<n-1) out.push(CUT);}
+    return out.join('');
+  }
+  function buildDoc(){
+    var sz=chooseSize(), mar=50, sets=SETS();
+    var BREAK='<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr><w:r><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:r></w:p>';
+    var body=pack(sets[0],sz,mar)+BREAK+pack(sets[1],sz,mar)+TINY;
+    var sect='<w:sectPr><w:pgSz w:w="'+PW+'" w:h="'+PH+'"/><w:pgMar w:top="'+M+'" w:right="'+M+'" w:bottom="'+M+'" w:left="'+M+'" w:header="0" w:footer="0" w:gutter="0"/><w:bidi/></w:sectPr>';
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+body+sect+'</w:body></w:document>';
+  }
+  async function makeDocx(){
+    var z=new JSZip();
+    z.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    z.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    z.file('word/document.xml',buildDoc());
+    return z.generateAsync({type:'blob',compression:'DEFLATE'});
+  }
+
+
+  // ---------- Download ----------
+  var dlStatus=$('dlStatus'), dlBtn=$('dl');
+  dlBtn.addEventListener('click',async function(){
+    dlBtn.disabled=true;
+    try{
+      await saveEdits();
+      var blob=await makeDocx();
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='self-assessment-slips.docx';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){URL.revokeObjectURL(a.href)},4000);
+      setStatus(dlStatus,'تم تنزيل الملف.');
+    }catch(e){ setStatus(dlStatus,'تعذّر إنشاء الملف. أعد المحاولة.',true); }
+    finally{dlBtn.disabled=false}
+  });
+})();
+</script>
+</body>
+</html>

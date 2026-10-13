@@ -1,0 +1,15 @@
+{
+  "name": "rubric-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "منصة المحكّات المعيارية: توليد محكّات التقييم الذاتي وتنزيلها قصاصات Word",
+  "scripts": {
+    "dev": "node dev-server.js",
+    "test": "node test/run.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
+  },
+  "engines": { "node": ">=20" }
+}
