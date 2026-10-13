@@ -7,7 +7,7 @@ import { SportsNewsView } from "./SportsNewsView";
 import { AiButton } from "./AiPanel";
 import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
-import { GROUP_ORDER, EUROPE, groupCounts, groupsOf, type GroupId } from "./groups";
+import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
 
 type Tab = "live" | "news" | "guide" | "catalog" | "premium" | "manage";
 
@@ -31,12 +31,6 @@ export function App() {
   const [query, setQuery] = useState("");
   const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
   const [duplicateMessage, setDuplicateMessage] = useState("");
-  const [importingAdult, setImportingAdult] = useState(false);
-  const [adultImportMessage, setAdultImportMessage] = useState("");
-  const [importingArabic, setImportingArabic] = useState(false);
-  const [importMessage, setImportMessage] = useState("");
-  const [adultEuropeOnly, setAdultEuropeOnly] = useState(false);
-  const [adultConfirmed, setAdultConfirmed] = useState(false);
   const [group, setGroup] = useState<string>("all"); // a GroupId, or "src:<sourceId>" for one of the user's own sources
   const [sources, setSources] = useState<Source[]>([]);
   const [limit, setLimit] = useState(200);
@@ -127,8 +121,8 @@ export function App() {
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
-    return list.filter((c) => (adultEuropeOnly ? Boolean(c.country && EUROPE.has(c.country.toUpperCase()) && [...(c.categories ?? []), c.group ?? ""].some(x => /^(adult|xxx|18\+|erotic)$/i.test(x.trim()))) : inGroup(c, group)) && (!country || c.country === country));
-  }, [channels, hits, group, country, adultEuropeOnly]);
+    return list.filter((c) => inGroup(c, group) && (!country || c.country === country));
+  }, [channels, hits, group, country]);
   // Countries present in the chosen group (so "Europe" can be narrowed to France, Germany, ...), with counts.
   const countries = useMemo(() => {
     const n = new Map<string, number>();
@@ -143,7 +137,7 @@ export function App() {
     for (const c of channels) if (!c.hidden && c.sourceId) n.set(c.sourceId, (n.get(c.sourceId) ?? 0) + 1);
     return n;
   }, [channels]);
-  useEffect(() => setLimit(200), [group, hits, country, adultEuropeOnly]);
+  useEffect(() => setLimit(200), [group, hits, country]);
   useEffect(() => setCountry(""), [group]);
   useEffect(() => {
     if (group.startsWith("src:") && sources.length > 0 && !sources.some((x) => `src:${x.id}` === group)) setGroup("all"); // the source was deleted
@@ -183,21 +177,18 @@ export function App() {
       {tab === "live" && (
         <div className="layout">
           <section className="list">
-            <div className="hint" role="status"><button disabled={importingArabic} onClick={() => { if (!window.confirm("استيراد جميع القنوات العربية المتاحة في الدليل إلى حسابك دون حذف القنوات الحالية؟")) return; setImportingArabic(true); setImportMessage(""); void api.importCatalog({ arabic: "1" }, "القنوات العربية", 20000).then(async result => { setImportMessage("أضيفت " + result.added + " قناة، وتُخطيت " + result.skipped + " قناة مكررة أو غير متاحة."); await refresh(); }).catch(e => setImportMessage((e as Error).message)).finally(() => setImportingArabic(false)); }}>{importingArabic ? "جارٍ استيراد القنوات العربية..." : "＋ استيراد كل القنوات العربية المتاحة"}</button> {importMessage}</div>
             <div className="hint"><button disabled={cleaningDuplicates} onClick={() => void cleanDuplicates()}>{cleaningDuplicates ? "جارٍ حذف المكرر..." : "تنظيف القنوات المكررة (" + duplicates.length + ")"}</button> {duplicateMessage}</div>
             {recs.length > 0 && !hits && <p className="hint">{s.forYou}: {recs.map((id) => channels.find((c) => c.id === id)?.name).filter(Boolean).slice(0, 3).join(", ")}</p>}
             {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length > 0 ? "" : !loaded ? s.loading : stats && stats.channels > 0 ? `${s.loading} (${stats.channels.toLocaleString()})` : stats ? `${s.savedZero} ${stats.catalog > 0 ? s.catalogReady.replace("{n}", stats.catalog.toLocaleString()) : s.noChannelsYet}` : s.noChannelsYet}</p>}
             {!hits && (
               <div className="groups" role="tablist" aria-label="Groups">
                 {GROUP_ORDER.filter((g) => g === "all" || counts[g] > 0).map((g) => (
-                  <button key={g} role="tab" aria-selected={group === g} aria-pressed={group === g} onClick={() => { setAdultEuropeOnly(false); setGroup(g); }}>
+                  <button key={g} role="tab" aria-selected={group === g} aria-pressed={group === g} onClick={() => { setGroup(g); }}>
                     {s[`g_${g}` as keyof typeof s]} <small>{counts[g]}</small>
                   </button>
                 ))}
-                <button type="button" disabled={importingAdult} onClick={() => { if (!adultConfirmed && !window.confirm("هذه القنوات مخصصة للبالغين 18 عامًا فأكثر. هل تؤكد أنك تبلغ 18 عامًا على الأقل؟")) return; setAdultConfirmed(true); if (!window.confirm("استيراد القنوات الأوروبية المصنفة للبالغين والمتاحة قانونيًا في الدليل؟ قد لا يتضمن الدليل أي قنوات من هذا النوع.")) return; setImportingAdult(true); setAdultImportMessage(""); void api.importCatalog({ europe: "1", category: "adult" }, "قنوات أوروبا +18", 20000).then(async r => { setAdultImportMessage("أضيفت " + r.added + " قناة، وتُخطيت " + r.skipped + "."); await refresh(); }).catch(e => setAdultImportMessage("تعذر الاستيراد: " + (e as Error).message)).finally(() => setImportingAdult(false)); }}>{importingAdult ? "جارٍ استيراد +18..." : "استيراد أوروبا +18"}</button> {adultImportMessage}
-                <button type="button" role="tab" aria-selected={adultEuropeOnly} aria-pressed={adultEuropeOnly} onClick={() => { if (adultEuropeOnly) { setAdultEuropeOnly(false); return; } if (!adultConfirmed && !window.confirm("هذا القسم مخصص للبالغين 18 عامًا فأكثر. هل تؤكد أنك تبلغ 18 عامًا على الأقل؟")) return; setAdultConfirmed(true); setAdultEuropeOnly(true); setHits(null); setCountry(""); }}>قنوات أوروبا +18 <small>{channels.filter(c => !c.hidden && c.country && EUROPE.has(c.country.toUpperCase()) && [...(c.categories ?? []), c.group ?? ""].some(x => /^(adult|xxx|18\+|erotic)$/i.test(x.trim()))).length}</small></button>
                 {sources.filter((src) => src.type !== "xmltv").map((src) => (
-                  <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => { setAdultEuropeOnly(false); setGroup(`src:${src.id}`); }} title={sourceCounts.get(src.id) ? undefined : s.emptySource}>
+                  <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => { setGroup(`src:${src.id}`); }} title={sourceCounts.get(src.id) ? undefined : s.emptySource}>
                     ▤ {src.name} <small>{sourceCounts.get(src.id) ?? 0}</small>
                   </button>
                 ))}
@@ -209,7 +200,6 @@ export function App() {
                 )}
               </div>
             )}
-            {adultEuropeOnly && <p className="hint" role="status">تظهر هنا القنوات الأوروبية المصنفة للبالغين الموجودة في حسابك فقط. لا تُضاف روابط غير مرخصة.</p>}
             <ul>
               {visible.slice(0, limit).map((c) => (
                 <li key={c.id} className={selected?.id === c.id ? "active" : ""}>
