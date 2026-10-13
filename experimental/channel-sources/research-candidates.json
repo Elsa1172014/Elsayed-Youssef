@@ -1,0 +1,37 @@
+{
+  "updated": "2026-10-13",
+  "note": "Research candidates only. These are NOT playable sources and are not added to the enabled catalog.",
+  "reference": "https://mavise.obs.coe.int/advanced-search",
+  "channels": [
+    {
+      "name": "Adult Channel",
+      "region": "UK",
+      "status": "source_not_verified",
+      "playbackUrl": null
+    },
+    {
+      "name": "Brazzers TV Europe",
+      "region": "Europe",
+      "status": "source_not_verified",
+      "playbackUrl": null
+    },
+    {
+      "name": "Hustler TV Europe",
+      "region": "Europe",
+      "status": "source_not_verified",
+      "playbackUrl": null
+    },
+    {
+      "name": "Television X",
+      "region": "UK",
+      "status": "source_not_verified",
+      "playbackUrl": null
+    },
+    {
+      "name": "Dorcel TV",
+      "region": "Europe",
+      "status": "source_not_verified",
+      "playbackUrl": null
+    }
+  ]
+}
