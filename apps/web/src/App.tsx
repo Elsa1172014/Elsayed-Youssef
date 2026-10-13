@@ -3,12 +3,13 @@ import { api, persistToken, setBase, setOnUnauthorized, setToken, storedToken, t
 import { t, type Lang } from "./i18n";
 import { Player } from "./Player";
 import { SportsView } from "./SportsView";
+import { SportsNewsView } from "./SportsNewsView";
 import { AiButton } from "./AiPanel";
 import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
 import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
 
-type Tab = "live" | "sports" | "guide" | "catalog" | "premium" | "manage";
+type Tab = "live" | "sports" | "news" | "guide" | "catalog" | "premium" | "manage";
 
 // Packaged TV builds (Tizen/webOS) set VITE_API_BASE at build time; the web build uses the dev proxy / same origin.
 setBase((import.meta.env.VITE_API_BASE as string | undefined) ?? "");
@@ -119,12 +120,12 @@ export function App() {
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
-  const tabs: Tab[] = ["live", "sports", "guide", "catalog", "premium", "manage"];
+  const tabs: Tab[] = ["live", "sports", "news", "guide", "catalog", "premium", "manage"];
   return (
     <div className="app" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <header>
         <h1>Smart Receiver</h1>
-        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "sports" ? "🏆 Sports Live" : s[x]}</button>)}</nav>
+        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "sports" ? "🏆 Sports Live" : x === "news" ? "📰 Sports News" : s[x]}</button>)}</nav>
         <input
           type="search"
           name="channel-search"
@@ -201,6 +202,7 @@ export function App() {
       )}
       <div className="page">
         {tab === "sports" && <SportsView channels={channels} onPlay={(c) => { playChannel(c); setTab("live"); }} />}
+        {tab === "news" && <SportsNewsView />}
         {tab === "guide" && <GuideView channels={channels.filter((c) => !c.hidden)} />}
         {tab === "catalog" && <CatalogView s={s} run={run} refresh={refresh} />}
         {tab === "premium" && <PremiumView s={s} lang={lang} channels={channels} refresh={refresh} run={run} onPlay={(c) => { playChannel(c); setTab("live"); }} />}
