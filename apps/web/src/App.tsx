@@ -9,7 +9,7 @@ import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
 import { GROUP_ORDER, EUROPE, groupCounts, groupsOf, type GroupId } from "./groups";
 
-type Tab = "live" | "sports" | "news" | "guide" | "catalog" | "premium" | "manage";
+type Tab = "live" | "news" | "guide" | "catalog" | "premium" | "manage";
 
 // Packaged TV builds (Tizen/webOS) set VITE_API_BASE at build time; the web build uses the dev proxy / same origin.
 setBase((import.meta.env.VITE_API_BASE as string | undefined) ?? "");
@@ -91,7 +91,7 @@ export function App() {
 
   // Channels can be added from other tabs (catalog, premium, manage) or other devices: reload when opening Live/Guide/Manage.
   useEffect(() => {
-    if (signedIn && (tab === "live" || tab === "sports" || tab === "guide" || tab === "manage")) void refresh();
+    if (signedIn && (tab === "live" || tab === "guide" || tab === "manage")) void refresh();
   }, [tab, signedIn, refresh]);
 
   const inGroup = (c: Channel, g: string) => (g === "all" ? true : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
@@ -122,12 +122,12 @@ export function App() {
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
-  const tabs: Tab[] = ["live", "sports", "news", "guide", "catalog", "premium", "manage"];
+  const tabs: Tab[] = ["live", "news", "guide", "catalog", "premium", "manage"];
   return (
     <div className="app" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <header>
         <h1>Smart Receiver</h1>
-        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "sports" ? "🏆 Sports Live" : x === "news" ? "📰 Sports News" : s[x]}</button>)}</nav>
+        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "news" ? "⚽ الرياضة والأخبار" : s[x]}</button>)}</nav>
         <input
           type="search"
           name="channel-search"
@@ -205,8 +205,7 @@ export function App() {
         </div>
       )}
       <div className="page">
-        {tab === "sports" && <SportsView channels={channels} onPlay={(c) => { playChannel(c); setTab("live"); }} />}
-        {tab === "news" && <SportsNewsView />}
+        {tab === "news" && <><SportsView channels={channels} onPlay={(c) => { playChannel(c); setTab("live"); }} /><SportsNewsView /></>}
         {tab === "guide" && <GuideView channels={channels.filter((c) => !c.hidden)} />}
         {tab === "catalog" && <CatalogView s={s} run={run} refresh={refresh} />}
         {tab === "premium" && <PremiumView s={s} lang={lang} channels={channels} refresh={refresh} run={run} onPlay={(c) => { playChannel(c); setTab("live"); }} />}
