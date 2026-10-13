@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Channel } from "./api";
 
-type Event = { idEvent: string; strEvent?: string; strHomeTeam?: string; strAwayTeam?: string; strSport?: string; strTVStation?: string; dateEvent?: string; strTime?: string; strTimestamp?: string };
+type Event = { idEvent: string; strEvent?: string; strHomeTeam?: string; strAwayTeam?: string; strSport?: string; strLeague?: string; strTVStation?: string; dateEvent?: string; strTime?: string; strTimestamp?: string };
 type Tv = { idEvent?: string; strChannel?: string; strTVStation?: string; strCountry?: string };
 const norm = (s: string) => s.toLocaleLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/g, "");
 function timeUAE(e: Event) {
@@ -13,6 +13,20 @@ function timeUAE(e: Event) {
 export function SportsView({ channels, onPlay }: { channels: Channel[]; onPlay: (channel: Channel) => void }) {
   const [date, setDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" }));
   const [refresh, setRefresh] = useState(0);
+  const [league, setLeague] = useState("all");
+  const leagues = [
+    ["all", "جميع الدوريات والبطولات"],
+    ["UEFA Champions League", "دوري أبطال أوروبا"],
+    ["UEFA European Championship", "كأس الأمم الأوروبية"],
+    ["English Premier League", "الدوري الإنجليزي"],
+    ["Spanish La Liga", "الدوري الإسباني"],
+    ["Turkish Super Lig", "الدوري التركي"],
+    ["Egyptian Premier League", "الدوري المصري"],
+    ["Italian Serie A", "الدوري الإيطالي"],
+    ["German Bundesliga", "الدوري الألماني"],
+    ["French Ligue 1", "الدوري الفرنسي"],
+    ["Saudi Pro League", "الدوري السعودي"],
+  ];
   const [events, setEvents] = useState<Event[]>([]);
   const [tv, setTv] = useState<Tv[]>([]);
   const [error, setError] = useState("");
@@ -22,8 +36,9 @@ export function SportsView({ channels, onPlay }: { channels: Channel[]; onPlay: 
     const ctrl = new AbortController();
     setLoading(true); setError(""); setEvents([]); setTv([]);
     const root = "https://www.thesportsdb.com/api/v1/json/123/";
+    const leagueParam = league === "all" ? "" : "&l=" + encodeURIComponent(league);
     Promise.allSettled([
-      fetch(root + "eventsday.php?d=" + encodeURIComponent(date) + "&s=Soccer", { signal: ctrl.signal }).then(r => { if (!r.ok) throw Error(String(r.status)); return r.json(); }),
+      fetch(root + "eventsday.php?d=" + encodeURIComponent(date) + "&s=Soccer" + leagueParam, { signal: ctrl.signal }).then(r => { if (!r.ok) throw Error(String(r.status)); return r.json(); }),
       fetch(root + "eventstv.php?d=" + encodeURIComponent(date) + "&s=Soccer", { signal: ctrl.signal }).then(r => { if (!r.ok) throw Error(String(r.status)); return r.json(); })
     ]).then(([fixtures, broadcasts]) => {
       if (ctrl.signal.aborted) return;
@@ -38,7 +53,7 @@ export function SportsView({ channels, onPlay }: { channels: Channel[]; onPlay: 
       setLoading(false);
     });
     return () => ctrl.abort();
-  }, [date, refresh]);
+  }, [date, league, refresh]);
   const findStations = (e: Event) => {
     const names = [e.strTVStation, ...tv.filter(t => t.idEvent === e.idEvent).map(t => t.strChannel || t.strTVStation)].filter((x): x is string => !!x && !!x.trim());
     return [...new Set(names.flatMap(n => n.split(/[,،;]/).map(s => s.trim()).filter(Boolean)))];
@@ -47,6 +62,7 @@ export function SportsView({ channels, onPlay }: { channels: Channel[]; onPlay: 
     <h2>⚽ مباريات كرة القدم</h2>
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
       <input aria-label="تاريخ المباريات" type="date" value={date} onChange={e => setDate(e.target.value)} />
+      <select aria-label="اختر الدوري أو البطولة" value={league} onChange={e => setLeague(e.target.value)}>{leagues.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
       <button onClick={() => setRefresh(n => n + 1)}>تحديث</button>
     </div>
     <div style={{ overflowX: "auto" }}>
@@ -69,7 +85,7 @@ export function SportsView({ channels, onPlay }: { channels: Channel[]; onPlay: 
     </div>
     {loading && <p role="status">جاري تحديث المباريات...</p>}
     {error && <p role="alert">{error}</p>}
-    {!loading && !error && events.length === 0 && <p>لا توجد مباريات متاحة لهذا اليوم في مصدر البيانات.</p>}
+    {!loading && !error && events.length === 0 && <p>لا توجد مباريات متاحة لهذا التاريخ أو البطولة في مصدر البيانات. قد تكون التغطية المجانية محدودة؛ جرّب تاريخًا آخر.</p>}
     <small>القنوات الناقلة بحسب بيانات TheSportsDB المتاحة؛ قد تكون غير مكتملة. زر التشغيل يظهر فقط عند تطابق اسم القناة مع قناة محفوظة في حسابك.</small>
   </section>;
 }
