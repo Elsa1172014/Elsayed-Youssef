@@ -8,8 +8,10 @@
     "dev": "node dev-server.js",
     "test": "node test/run.js"
   },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.133.0"
+  "engines": {
+    "node": ">=20"
   },
-  "engines": { "node": ">=20" }
+  "dependencies": {
+    "@google/genai": "^2.29.1"
+  }
 }

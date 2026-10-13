@@ -1,4 +1,4 @@
-// End-to-end check of the API against fake Upstash and fake Anthropic servers (no real keys needed).
+// End-to-end check of the API against fake Upstash and fake Gemini servers (no real keys needed).
 import http from 'node:http';
 import assert from 'node:assert/strict';
 
@@ -15,21 +15,21 @@ const upstash = http.createServer(async (req, res) => {
 });
 
 const crit = (n) => ({ name: `محك ${n}`, advanced: 'أحلّل بعمق.', proficient: 'أحلّل بصورة صحيحة.', developing: 'أحدّد جزءًا بالطريقة التي تناسب مستواي.', beginner: 'أذكر جزءًا بالطريقة التي تناسب مستواي.' });
-let anthropicMode = 'ok';
-const anthropic = http.createServer(async (req, res) => {
+let mode = 'ok';
+const gemini = http.createServer(async (req, res) => {
   for await (const _ of req); // drain
   res.setHeader('Content-Type', 'application/json');
-  const text = anthropicMode === 'ok' ? JSON.stringify({ criteria: [crit(1), crit(2), crit(3)] })
-    : anthropicMode === 'two' ? JSON.stringify({ criteria: [crit(1), crit(2)] }) : 'not json';
-  res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: `هذا الناتج:\n${text}` }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }));
+  const text = mode === 'ok' ? JSON.stringify({ criteria: [crit(1), crit(2), crit(3)] })
+    : mode === 'two' ? JSON.stringify({ criteria: [crit(1), crit(2)] }) : 'not json';
+  res.end(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP', index: 0 }] }));
 });
 
 const listen = (s) => new Promise((r) => s.listen(0, () => r(s.address().port)));
-const up = await listen(upstash), an = await listen(anthropic);
+const up = await listen(upstash), an = await listen(gemini);
 process.env.UPSTASH_REDIS_REST_URL = `http://127.0.0.1:${up}`;
 process.env.UPSTASH_REDIS_REST_TOKEN = 't';
-process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${an}`;
-process.env.ANTHROPIC_API_KEY = 'test';
+process.env.GEMINI_BASE_URL = `http://127.0.0.1:${an}`;
+process.env.GEMINI_API_KEY = 'test';
 process.env.ACCESS_CODE = 'secret-code';
 
 const { createServer } = await import('../dev-server.js');
@@ -48,9 +48,9 @@ r = await call('/api/generate', { method: 'POST', body: { goal: 'أن يقيّم
 assert.equal(r.status, 200); assert.equal(r.json.goal.criteria.length, 3); assert.equal(r.json.goal.teacher, 'أ. سارة');
 const id = r.json.goal.id;
 
-anthropicMode = 'two';
+mode = 'two';
 r = await call('/api/generate', { method: 'POST', body: { goal: 'هدف تجريبي طويل بما يكفي' } }); assert.equal(r.status, 502);
-anthropicMode = 'junk';
+mode = 'junk';
 r = await call('/api/generate', { method: 'POST', body: { goal: 'هدف تجريبي طويل بما يكفي' } }); assert.equal(r.status, 502);
 
 r = await call('/api/goals'); assert.equal(r.json.goals.length, 1);
@@ -63,5 +63,5 @@ r = await call(`/api/goals?id=${id}`, { method: 'DELETE' }); assert.equal(r.stat
 r = await call('/api/goals'); assert.equal(r.json.goals.length, 0);
 
 console.log('all api checks passed');
-for (const s of [upstash, anthropic, app]) s.close();
+for (const s of [upstash, gemini, app]) s.close();
 process.exit(0);

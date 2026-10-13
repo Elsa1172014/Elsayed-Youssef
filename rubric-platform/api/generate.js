@@ -1,8 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI, ApiError } from '@google/genai';
 import { randomUUID } from 'node:crypto';
 import { authenticate, send, redis, readBody, cleanCriteria, GOALS_KEY } from './_lib.js';
 
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
+// Set GEMINI_MODEL to the exact model id shown in Google AI Studio (e.g. the Gemini 3.x model you use).
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 
 const EXAMPLE = {
   name: 'تقييم حجة الكاتب',
@@ -49,23 +50,21 @@ export default async function handler(req, res) {
   const goal = String(body.goal ?? '').trim();
   if (goal.length < 8) return send(res, 400, { error: 'اكتب الهدف التعليمي كاملًا.' });
   if (goal.length > 600) return send(res, 400, { error: 'الهدف طويل جدًّا، اختصره في 600 حرف أو أقل.' });
-  if (!process.env.ANTHROPIC_API_KEY) return send(res, 500, { error: 'مفتاح ANTHROPIC_API_KEY غير مضبوط في الخادم.' });
+  if (!process.env.GEMINI_API_KEY) return send(res, 500, { error: 'مفتاح GEMINI_API_KEY غير مضبوط في الخادم.' });
 
   try {
-    const client = new Anthropic();
-    const response = await client.beta.messages.create({
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      ...(process.env.GEMINI_BASE_URL ? { httpOptions: { baseUrl: process.env.GEMINI_BASE_URL } } : {}),
+    });
+    const response = await ai.models.generateContent({
       model: MODEL,
-      max_tokens: 8000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: { effort: 'low' },
-      messages: [{ role: 'user', content: buildPrompt(goal) }],
+      contents: buildPrompt(goal),
+      config: { responseMimeType: 'application/json', temperature: 0.7 },
     });
 
-    if (response.stop_reason === 'refusal') {
-      return send(res, 422, { error: 'تعذّر توليد المحكّات لهذا الهدف. أعد صياغته وحاول مرة أخرى.' });
-    }
-    const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+    const text = response.text ?? '';
+    if (!text) return send(res, 422, { error: 'تعذّر توليد المحكّات لهذا الهدف. أعد صياغته وحاول مرة أخرى.' });
     const criteria = cleanCriteria(extractJson(text)?.criteria);
     if (!criteria) return send(res, 502, { error: 'جاء الناتج بصيغة غير صالحة. أعد المحاولة.' });
 
@@ -74,9 +73,12 @@ export default async function handler(req, res) {
     await redis(['HSET', GOALS_KEY, saved.id, JSON.stringify(saved)]);
     return send(res, 200, { goal: saved });
   } catch (e) {
-    if (e instanceof Anthropic.RateLimitError) return send(res, 429, { error: 'الطلبات كثيرة الآن، انتظر قليلًا ثم أعد المحاولة.' });
-    if (e instanceof Anthropic.AuthenticationError) return send(res, 500, { error: 'مفتاح Anthropic غير صالح في إعدادات الخادم.' });
-    if (e instanceof Anthropic.APIError) return send(res, 502, { error: 'تعذّر الاتصال بخدمة التوليد. أعد المحاولة.' });
+    if (e instanceof ApiError) {
+      if (e.status === 429) return send(res, 429, { error: 'الطلبات كثيرة الآن، انتظر قليلًا ثم أعد المحاولة.' });
+      if (e.status === 400 || e.status === 401 || e.status === 403) return send(res, 500, { error: 'مفتاح Gemini أو اسم النموذج غير صالح في إعدادات الخادم.' });
+      if (e.status === 404) return send(res, 500, { error: 'اسم النموذج GEMINI_MODEL غير موجود. تحقق منه في Google AI Studio.' });
+      return send(res, 502, { error: 'تعذّر الاتصال بخدمة التوليد. أعد المحاولة.' });
+    }
     return send(res, 500, { error: e.message || 'خطأ في الخادم.' });
   }
 }
