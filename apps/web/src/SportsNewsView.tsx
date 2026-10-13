@@ -2,11 +2,10 @@ import { useEffect, useState } from "react";
 
 type Article = { title: string; link: string; pubDate?: string; description?: string };
 const sources = [
-  { name: "BBC Football", url: "https://feeds.bbci.co.uk/sport/football/rss.xml", home: "https://www.bbc.com/sport/football" },
-  { name: "BBC Champions League", url: "https://feeds.bbci.co.uk/sport/football/champions-league/rss.xml", home: "https://www.bbc.com/sport/football/champions-league" },
-  { name: "Sky Sports Football", url: "https://www.skysports.com/rss/11095", home: "https://www.skysports.com/football" },
-  { name: "The Athletic", url: "https://www.nytimes.com/athletic/rss/news/", home: "https://www.nytimes.com/athletic/football/" },
-  { name: "Google News Arabic Sports", url: "https://news.google.com/rss/search?q=%D8%A3%D8%AE%D8%A8%D8%A7%D8%B1+%D9%83%D8%B1%D8%A9+%D8%A7%D9%84%D9%82%D8%AF%D9%85&hl=ar&gl=AE&ceid=AE:ar", home: "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNREZqT0dZU0FtVnVLQUFQAQ?hl=ar" },
+  { name: "أخبار كرة القدم العربية", url: "https://news.google.com/rss/search?q=" + encodeURIComponent("كرة القدم الدوري المصري الدوري السعودي") + "&hl=ar&gl=AE&ceid=AE:ar", home: "https://news.google.com/?hl=ar&gl=AE&ceid=AE:ar" },
+  { name: "دوري أبطال أوروبا بالعربية", url: "https://news.google.com/rss/search?q=" + encodeURIComponent("دوري أبطال أوروبا مباريات") + "&hl=ar&gl=AE&ceid=AE:ar", home: "https://news.google.com/?hl=ar&gl=AE&ceid=AE:ar" },
+  { name: "الدوري الإنجليزي والإسباني", url: "https://news.google.com/rss/search?q=" + encodeURIComponent("الدوري الإنجليزي الدوري الإسباني") + "&hl=ar&gl=AE&ceid=AE:ar", home: "https://news.google.com/?hl=ar&gl=AE&ceid=AE:ar" },
+  { name: "الأخبار الرياضية العالمية بالعربية", url: "https://news.google.com/rss/search?q=" + encodeURIComponent("رياضة كرة قدم انتقالات نتائج") + "&hl=ar&gl=AE&ceid=AE:ar", home: "https://news.google.com/?hl=ar&gl=AE&ceid=AE:ar" }
 ];
 export function SportsNewsView() {
   const [items, setItems] = useState<{ source: string; article: Article }[]>([]);
@@ -26,7 +25,7 @@ export function SportsNewsView() {
     })).then(results => {
       if (cancelled) return;
       const news = results.flatMap(r => r.status === "fulfilled" ? r.value : []);
-      news.sort((a, b) => Date.parse(b.article.pubDate || "") - Date.parse(a.article.pubDate || ""));
+      news.sort((a, b) => (Date.parse(b.article.pubDate || "") || 0) - (Date.parse(a.article.pubDate || "") || 0));
       setItems(news);
       if (!news.length) setError("تعذر تحميل العناوين تلقائيًا من مصادر RSS. يمكنك فتح المصادر مباشرة أدناه.");
       setBusy(false);
