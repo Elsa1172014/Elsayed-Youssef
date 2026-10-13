@@ -7,7 +7,7 @@ import { SportsNewsView } from "./SportsNewsView";
 import { AiButton } from "./AiPanel";
 import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
-import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
+import { GROUP_ORDER, EUROPE, groupCounts, groupsOf, type GroupId } from "./groups";
 
 type Tab = "live" | "sports" | "news" | "guide" | "catalog" | "premium" | "manage";
 
@@ -29,6 +29,8 @@ export function App() {
   const [playNonce, setPlayNonce] = useState(0); // bumps to restart the player when the AI repair found a better source
   const playChannel = useCallback((c: Channel) => { setSelected(c); setPlayNonce((n) => n + 1); }, []);
   const [query, setQuery] = useState("");
+  const [adultEuropeOnly, setAdultEuropeOnly] = useState(false);
+  const [adultConfirmed, setAdultConfirmed] = useState(false);
   const [group, setGroup] = useState<string>("all"); // a GroupId, or "src:<sourceId>" for one of the user's own sources
   const [sources, setSources] = useState<Source[]>([]);
   const [limit, setLimit] = useState(200);
@@ -96,8 +98,8 @@ export function App() {
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
-    return list.filter((c) => inGroup(c, group) && (!country || c.country === country));
-  }, [channels, hits, group, country]);
+    return list.filter((c) => (adultEuropeOnly ? Boolean(c.country && EUROPE.has(c.country.toUpperCase()) && [...(c.categories ?? []), c.group ?? ""].some(x => /^(adult|xxx|18\+|erotic)$/i.test(x.trim()))) : inGroup(c, group)) && (!country || c.country === country));
+  }, [channels, hits, group, country, adultEuropeOnly]);
   // Countries present in the chosen group (so "Europe" can be narrowed to France, Germany, ...), with counts.
   const countries = useMemo(() => {
     const n = new Map<string, number>();
@@ -112,7 +114,7 @@ export function App() {
     for (const c of channels) if (!c.hidden && c.sourceId) n.set(c.sourceId, (n.get(c.sourceId) ?? 0) + 1);
     return n;
   }, [channels]);
-  useEffect(() => setLimit(200), [group, hits, country]);
+  useEffect(() => setLimit(200), [group, hits, country, adultEuropeOnly]);
   useEffect(() => setCountry(""), [group]);
   useEffect(() => {
     if (group.startsWith("src:") && sources.length > 0 && !sources.some((x) => `src:${x.id}` === group)) setGroup("all"); // the source was deleted
@@ -157,12 +159,13 @@ export function App() {
             {!hits && (
               <div className="groups" role="tablist" aria-label="Groups">
                 {GROUP_ORDER.filter((g) => g === "all" || counts[g] > 0).map((g) => (
-                  <button key={g} role="tab" aria-selected={group === g} aria-pressed={group === g} onClick={() => setGroup(g)}>
+                  <button key={g} role="tab" aria-selected={group === g} aria-pressed={group === g} onClick={() => { setAdultEuropeOnly(false); setGroup(g); }}>
                     {s[`g_${g}` as keyof typeof s]} <small>{counts[g]}</small>
                   </button>
                 ))}
+                <button type="button" role="tab" aria-selected={adultEuropeOnly} aria-pressed={adultEuropeOnly} onClick={() => { if (adultEuropeOnly) { setAdultEuropeOnly(false); return; } if (!adultConfirmed && !window.confirm("هذا القسم مخصص للبالغين 18 عامًا فأكثر. هل تؤكد أنك تبلغ 18 عامًا على الأقل؟")) return; setAdultConfirmed(true); setAdultEuropeOnly(true); setHits(null); setCountry(""); }}>قنوات أوروبا +18 <small>{channels.filter(c => !c.hidden && c.country && EUROPE.has(c.country.toUpperCase()) && [...(c.categories ?? []), c.group ?? ""].some(x => /^(adult|xxx|18\+|erotic)$/i.test(x.trim()))).length}</small></button>
                 {sources.filter((src) => src.type !== "xmltv").map((src) => (
-                  <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => setGroup(`src:${src.id}`)} title={sourceCounts.get(src.id) ? undefined : s.emptySource}>
+                  <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => { setAdultEuropeOnly(false); setGroup(`src:${src.id}`); }} title={sourceCounts.get(src.id) ? undefined : s.emptySource}>
                     ▤ {src.name} <small>{sourceCounts.get(src.id) ?? 0}</small>
                   </button>
                 ))}
@@ -174,6 +177,7 @@ export function App() {
                 )}
               </div>
             )}
+            {adultEuropeOnly && <p className="hint" role="status">تظهر هنا القنوات الأوروبية المصنفة للبالغين الموجودة في حسابك فقط. لا تُضاف روابط غير مرخصة.</p>}
             <ul>
               {visible.slice(0, limit).map((c) => (
                 <li key={c.id} className={selected?.id === c.id ? "active" : ""}>
