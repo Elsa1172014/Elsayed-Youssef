@@ -29,6 +29,10 @@ export function App() {
   const [playNonce, setPlayNonce] = useState(0); // bumps to restart the player when the AI repair found a better source
   const playChannel = useCallback((c: Channel) => { setSelected(c); setPlayNonce((n) => n + 1); }, []);
   const [query, setQuery] = useState("");
+  const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
+  const [duplicateMessage, setDuplicateMessage] = useState("");
+  const [importingAdult, setImportingAdult] = useState(false);
+  const [adultImportMessage, setAdultImportMessage] = useState("");
   const [importingArabic, setImportingArabic] = useState(false);
   const [importMessage, setImportMessage] = useState("");
   const [adultEuropeOnly, setAdultEuropeOnly] = useState(false);
@@ -96,6 +100,29 @@ export function App() {
     if (signedIn && (tab === "live" || tab === "guide" || tab === "manage")) void refresh();
   }, [tab, signedIn, refresh]);
 
+  // Only identical normalized stream URLs are safe to remove automatically; channels with the same name may have different valid feeds.
+  const duplicates = useMemo(() => {
+    const seen = new Set<string>();
+    return channels.filter(c => {
+      const key = c.streamUrl?.trim().replace(/\/$/, "").toLowerCase();
+      if (!key) return false;
+      if (seen.has(key)) return true;
+      seen.add(key);
+      return false;
+    });
+  }, [channels]);
+  const cleanDuplicates = async () => {
+    if (!duplicates.length) { setDuplicateMessage("لا توجد قنوات مكررة بنفس رابط البث."); return; }
+    if (!window.confirm("حذف " + duplicates.length + " قناة لها رابط بث مطابق لقناة أخرى؟ لا يمكن التراجع عن الحذف. لن تُحذف القنوات المتشابهة في الاسم ذات الروابط المختلفة.")) return;
+    setCleaningDuplicates(true);
+    let removed = 0; let failed = 0;
+    for (const channel of duplicates) {
+      try { await api.deleteChannel(channel.id); removed++; } catch { failed++; }
+    }
+    setDuplicateMessage("حُذفت " + removed + " قناة مكررة، وفشل حذف " + failed + ".");
+    await refresh();
+    setCleaningDuplicates(false);
+  };
   const inGroup = (c: Channel, g: string) => (g === "all" ? true : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
@@ -157,6 +184,7 @@ export function App() {
         <div className="layout">
           <section className="list">
             <div className="hint" role="status"><button disabled={importingArabic} onClick={() => { if (!window.confirm("استيراد جميع القنوات العربية المتاحة في الدليل إلى حسابك دون حذف القنوات الحالية؟")) return; setImportingArabic(true); setImportMessage(""); void api.importCatalog({ arabic: "1" }, "القنوات العربية", 20000).then(async result => { setImportMessage("أضيفت " + result.added + " قناة، وتُخطيت " + result.skipped + " قناة مكررة أو غير متاحة."); await refresh(); }).catch(e => setImportMessage((e as Error).message)).finally(() => setImportingArabic(false)); }}>{importingArabic ? "جارٍ استيراد القنوات العربية..." : "＋ استيراد كل القنوات العربية المتاحة"}</button> {importMessage}</div>
+            <div className="hint"><button disabled={cleaningDuplicates} onClick={() => void cleanDuplicates()}>{cleaningDuplicates ? "جارٍ حذف المكرر..." : "تنظيف القنوات المكررة (" + duplicates.length + ")"}</button> {duplicateMessage}</div>
             {recs.length > 0 && !hits && <p className="hint">{s.forYou}: {recs.map((id) => channels.find((c) => c.id === id)?.name).filter(Boolean).slice(0, 3).join(", ")}</p>}
             {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length > 0 ? "" : !loaded ? s.loading : stats && stats.channels > 0 ? `${s.loading} (${stats.channels.toLocaleString()})` : stats ? `${s.savedZero} ${stats.catalog > 0 ? s.catalogReady.replace("{n}", stats.catalog.toLocaleString()) : s.noChannelsYet}` : s.noChannelsYet}</p>}
             {!hits && (
@@ -166,6 +194,7 @@ export function App() {
                     {s[`g_${g}` as keyof typeof s]} <small>{counts[g]}</small>
                   </button>
                 ))}
+                <button type="button" disabled={importingAdult} onClick={() => { if (!adultConfirmed && !window.confirm("هذه القنوات مخصصة للبالغين 18 عامًا فأكثر. هل تؤكد أنك تبلغ 18 عامًا على الأقل؟")) return; setAdultConfirmed(true); if (!window.confirm("استيراد القنوات الأوروبية المصنفة للبالغين والمتاحة قانونيًا في الدليل؟ قد لا يتضمن الدليل أي قنوات من هذا النوع.")) return; setImportingAdult(true); setAdultImportMessage(""); void api.importCatalog({ europe: "1", category: "adult" }, "قنوات أوروبا +18", 20000).then(async r => { setAdultImportMessage("أضيفت " + r.added + " قناة، وتُخطيت " + r.skipped + "."); await refresh(); }).catch(e => setAdultImportMessage("تعذر الاستيراد: " + (e as Error).message)).finally(() => setImportingAdult(false)); }}>{importingAdult ? "جارٍ استيراد +18..." : "استيراد أوروبا +18"}</button> {adultImportMessage}
                 <button type="button" role="tab" aria-selected={adultEuropeOnly} aria-pressed={adultEuropeOnly} onClick={() => { if (adultEuropeOnly) { setAdultEuropeOnly(false); return; } if (!adultConfirmed && !window.confirm("هذا القسم مخصص للبالغين 18 عامًا فأكثر. هل تؤكد أنك تبلغ 18 عامًا على الأقل؟")) return; setAdultConfirmed(true); setAdultEuropeOnly(true); setHits(null); setCountry(""); }}>قنوات أوروبا +18 <small>{channels.filter(c => !c.hidden && c.country && EUROPE.has(c.country.toUpperCase()) && [...(c.categories ?? []), c.group ?? ""].some(x => /^(adult|xxx|18\+|erotic)$/i.test(x.trim()))).length}</small></button>
                 {sources.filter((src) => src.type !== "xmltv").map((src) => (
                   <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => { setAdultEuropeOnly(false); setGroup(`src:${src.id}`); }} title={sourceCounts.get(src.id) ? undefined : s.emptySource}>
