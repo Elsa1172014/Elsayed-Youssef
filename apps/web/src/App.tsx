@@ -29,6 +29,8 @@ export function App() {
   const [playNonce, setPlayNonce] = useState(0); // bumps to restart the player when the AI repair found a better source
   const playChannel = useCallback((c: Channel) => { setSelected(c); setPlayNonce((n) => n + 1); }, []);
   const [query, setQuery] = useState("");
+  const [importingArabic, setImportingArabic] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
   const [adultEuropeOnly, setAdultEuropeOnly] = useState(false);
   const [adultConfirmed, setAdultConfirmed] = useState(false);
   const [group, setGroup] = useState<string>("all"); // a GroupId, or "src:<sourceId>" for one of the user's own sources
@@ -154,6 +156,7 @@ export function App() {
       {tab === "live" && (
         <div className="layout">
           <section className="list">
+            <div className="hint" role="status"><button disabled={importingArabic} onClick={() => { if (!window.confirm("استيراد جميع القنوات العربية المتاحة في الدليل إلى حسابك دون حذف القنوات الحالية؟")) return; setImportingArabic(true); setImportMessage(""); void api.importCatalog({ arabic: "1" }, "القنوات العربية", 20000).then(async result => { setImportMessage("أضيفت " + result.added + " قناة، وتُخطيت " + result.skipped + " قناة مكررة أو غير متاحة."); await refresh(); }).catch(e => setImportMessage((e as Error).message)).finally(() => setImportingArabic(false)); }}>{importingArabic ? "جارٍ استيراد القنوات العربية..." : "＋ استيراد كل القنوات العربية المتاحة"}</button> {importMessage}</div>
             {recs.length > 0 && !hits && <p className="hint">{s.forYou}: {recs.map((id) => channels.find((c) => c.id === id)?.name).filter(Boolean).slice(0, 3).join(", ")}</p>}
             {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length > 0 ? "" : !loaded ? s.loading : stats && stats.channels > 0 ? `${s.loading} (${stats.channels.toLocaleString()})` : stats ? `${s.savedZero} ${stats.catalog > 0 ? s.catalogReady.replace("{n}", stats.catalog.toLocaleString()) : s.noChannelsYet}` : s.noChannelsYet}</p>}
             {!hits && (
