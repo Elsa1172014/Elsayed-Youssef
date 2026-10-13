@@ -1,0 +1,12 @@
+import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+const source = readFileSync(new URL("./channel-catalog.js", import.meta.url), "utf8");
+const { listAuthorizedChannels, validateChannel } = await import("data:text/javascript," + encodeURIComponent(source));
+const catalog = JSON.parse(readFileSync(new URL("./catalog.json", import.meta.url), "utf8"));
+assert.deepEqual(listAuthorizedChannels(catalog), []);
+const sample = { id: "demo_1", name: "Example", sourceType: "hls", sourceUrl: "https://example.com/live.m3u8", rightsVerified: true, rightsNotes: "Demonstration only", enabled: true };
+assert.equal(validateChannel(sample), true);
+assert.equal(validateChannel({ ...sample, sourceUrl: "http://example.com/live.m3u8" }), false);
+assert.equal(validateChannel({ ...sample, rightsVerified: false }), false);
+assert.deepEqual(listAuthorizedChannels({ enabled: false, channels: [sample] }), []);
+console.log("Channel catalog validation passed");
