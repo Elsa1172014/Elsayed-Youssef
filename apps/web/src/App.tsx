@@ -150,7 +150,7 @@ export function App() {
     <div className="app" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <header>
         <h1>Smart Receiver</h1>
-        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "news" ? "⚽ الرياضة والأخبار" : s[x]}</button>)}</nav>
+        <nav>{tabs.map((x) => <><button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "news" ? "⚽ الرياضة والأخبار" : s[x]}</button>{x === "live" && <a key="youtube" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer" className="youtube-nav-link" aria-label="فتح منصة يوتيوب في تبويب جديد" style={{display:"inline-flex",alignItems:"center",padding:"8px 12px",borderRadius:8,textDecoration:"none",fontWeight:700,background:"#cc0000",color:"#fff"}}>▶ YouTube</a>}</>)}</nav>
         <input
           type="search"
           name="channel-search"
