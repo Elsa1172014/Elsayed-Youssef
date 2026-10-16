@@ -1,0 +1,10 @@
+{
+  "id": "com.smartreceiver.tv",
+  "version": "0.1.0",
+  "vendor": "Smart Receiver",
+  "type": "web",
+  "main": "index.html",
+  "title": "Smart Receiver TV",
+  "icon": "icon.png",
+  "resolution": "1920x1080"
+}
