@@ -1,0 +1,9 @@
+/* Opt-in 10-foot interface for Smart Receiver TV shells. */
+html.tv-mode {font-size:22px}
+.tv-mode body {margin:0;overscroll-behavior:none}
+.tv-mode button,.tv-mode a,.tv-mode input,.tv-mode select {min-height:54px;min-width:54px}
+.tv-mode :is(button,a,input,select,[tabindex]):focus-visible {outline:4px solid #36c9ff!important;outline-offset:4px;box-shadow:0 0 0 7px #092d42}
+.tv-mode nav {display:flex;flex-wrap:wrap;gap:12px}
+.tv-mode .row {min-height:72px}
+.tv-mode .list {overflow-y:auto;max-height:calc(100vh - 180px)}
+@media (min-width:1280px){.tv-mode .app{max-width:none;padding:24px 36px}.tv-mode header{gap:20px}}
