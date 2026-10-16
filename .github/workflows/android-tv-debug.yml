@@ -1,0 +1,36 @@
+name: Build Smart Receiver Android TV
+on:
+  workflow_dispatch:
+    inputs:
+      tv_branch:
+        description: 'Branch containing Android TV source'
+        required: true
+        default: 'feature/universal-smart-tv'
+        type: string
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tv_branch }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Build Android TV APK
+        working-directory: tv/android
+        run: gradle --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smart-receiver-tv-debug-apk
+          path: tv/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
