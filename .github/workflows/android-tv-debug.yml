@@ -24,9 +24,20 @@ jobs:
         with:
           gradle-version: '8.10.2'
       - name: Install Android SDK 35
+        shell: bash
         run: |
-          echo "y" | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::Android sdkmanager was not found in $SDK_ROOT"
+            exit 1
+          fi
+          echo "Using $SDKMANAGER"
+          "$SDKMANAGER" --version
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
       - name: Build Android TV APK
         working-directory: tv/android
         run: gradle --no-daemon :app:assembleDebug
