@@ -6,6 +6,7 @@ import "./styles.css";
 if (import.meta.env.VITE_TV_MODE === "true") {
   document.documentElement.classList.add("tv-mode");
   void Promise.all([
+    // @ts-ignore - plain JavaScript TV module outside the TypeScript source tree
     import("../../../tv/remote-navigation.js"),
     import("../../../tv/tv.css"),
   ]).then(([navigation]) => {
