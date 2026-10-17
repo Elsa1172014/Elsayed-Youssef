@@ -31,6 +31,9 @@ export function App() {
   const playChannel = useCallback((c: Channel) => { setSelected(c); setPlayNonce((n) => n + 1); }, []);
   const [query, setQuery] = useState("");
   const [showAudit, setShowAudit] = useState(false);
+  const [health, setHealth] = useState<Record<string, { status: string; detail: string }>>({});
+  const [healthBusy, setHealthBusy] = useState(false);
+  const [healthProgress, setHealthProgress] = useState(0);
   const [group, setGroup] = useState<string>("all"); // a GroupId, or "src:<sourceId>" for one of the user's own sources
   const [sources, setSources] = useState<Source[]>([]);
   const [limit, setLimit] = useState(200);
@@ -122,6 +125,27 @@ export function App() {
     const link = document.createElement("a"); link.href = url; link.download = "smart-receiver-channel-audit.csv"; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+
+  const checkChannelHealth = async () => {
+    if (healthBusy) return;
+    setHealthBusy(true);
+    const results: Record<string, { status: string; detail: string }> = {};
+    setHealthProgress(0);
+    for (let i = 0; i < channels.length; i += 3) {
+      await Promise.all(channels.slice(i, i + 3).map(async (c) => {
+        try {
+          const d = await api.diagnose(c.id);
+          const detail = JSON.stringify(d);
+          const outcome = String(d.outcome ?? "").toLowerCase();
+          const status = /playing|playable|success/.test(outcome) ? "تعمل" : /unavailable|failed|offline/.test(outcome) ? "فشل" : "غير مؤكدة";
+          results[c.id] = { status, detail: detail.slice(0, 350) };
+        } catch (e) { results[c.id] = { status: "غير مؤكدة", detail: (e as Error).message }; }
+      }));
+      setHealth({ ...results });
+      setHealthProgress(Math.min(i + 3, channels.length));
+    }
+    setHealthBusy(false);
+  };
   const inGroup = (c: Channel, g: string) => (g === "all" ? true : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
@@ -189,6 +213,16 @@ export function App() {
                 <p>إجمالي القنوات: {channels.length} · مجموعات روابط مكررة: {audit.sameUrl.length} · مجموعات أسماء مكررة: {audit.sameName.length} · روابط مفقودة أو غير معروفة: {audit.invalid.length}</p>
                 <p>حالة التشغيل غير مفحوصة: {channels.length}. لا يمكن اعتبار الرابط متعطلًا دون اختبار بث موثوق؛ لم تُرسل طلبات اختبار ولم تُعدّل أي قناة.</p>
                 <button onClick={downloadAudit}>تنزيل تقرير CSV بالتفاصيل</button>
+                <section aria-label="فحص تشغيل القنوات" style={{marginTop:14}}>
+                  <h3>حالة تشغيل القنوات من جميع المصادر</h3>
+                  <p>فحص قراءة فقط باستخدام تشخيص الخادم؛ قد لا يعكس بالضرورة التشغيل على التلفاز.</p>
+                  <button disabled={healthBusy || !channels.length} onClick={() => void checkChannelHealth()}>{healthBusy ? "جارٍ الفحص..." : "فحص جميع القنوات دون حذف"}</button>
+                  {healthBusy && <progress value={healthProgress} max={channels.length || 1} style={{width:"100%"}} />}
+                  <p>تم فحص {Object.keys(health).length} من {channels.length} قناة · تعمل: {Object.values(health).filter(x=>x.status==="تعمل").length} · فشل: {Object.values(health).filter(x=>x.status==="فشل").length} · غير مؤكدة: {Object.values(health).filter(x=>x.status==="غير مؤكدة").length}</p>
+                  <div style={{maxHeight:320,overflowY:"auto"}}>
+                    {channels.filter(c=>health[c.id] && health[c.id].status!=="تعمل").slice(0,200).map(c=><p key={c.id}><strong>{c.name}</strong> — {health[c.id].status} — {health[c.id].detail}</p>)}
+                  </div>
+                </section>
                 {audit.sameUrl.slice(0, 15).map((g, i) => <p key={"url"+i}>رابط مكرر ({g.length}): {g.map((c) => c.name).join("، ")}</p>)}
                 {audit.sameName.slice(0, 15).map((g, i) => <p key={"name"+i}>اسم مكرر ({g.length}): {g.map((c) => c.name).join("، ")}</p>)}
               </div>}
