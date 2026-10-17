@@ -30,8 +30,7 @@ export function App() {
   const [playNonce, setPlayNonce] = useState(0); // bumps to restart the player when the AI repair found a better source
   const playChannel = useCallback((c: Channel) => { setSelected(c); setPlayNonce((n) => n + 1); }, []);
   const [query, setQuery] = useState("");
-  const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
-  const [duplicateMessage, setDuplicateMessage] = useState("");
+  const [showAudit, setShowAudit] = useState(false);
   const [group, setGroup] = useState<string>("all"); // a GroupId, or "src:<sourceId>" for one of the user's own sources
   const [sources, setSources] = useState<Source[]>([]);
   const [limit, setLimit] = useState(200);
@@ -95,28 +94,33 @@ export function App() {
     if (signedIn && (tab === "live" || tab === "guide" || tab === "manage")) void refresh();
   }, [tab, signedIn, refresh]);
 
-  // Only identical normalized stream URLs are safe to remove automatically; channels with the same name may have different valid feeds.
-  const duplicates = useMemo(() => {
-    const seen = new Set<string>();
-    return channels.filter(c => {
-      const key = c.streamUrl?.trim().replace(/\/$/, "").toLowerCase();
-      if (!key) return false;
-      if (seen.has(key)) return true;
-      seen.add(key);
-      return false;
-    });
-  }, [channels]);
-  const cleanDuplicates = async () => {
-    if (!duplicates.length) { setDuplicateMessage("لا توجد قنوات مكررة بنفس رابط البث."); return; }
-    if (!window.confirm("حذف " + duplicates.length + " قناة لها رابط بث مطابق لقناة أخرى؟ لا يمكن التراجع عن الحذف. لن تُحذف القنوات المتشابهة في الاسم ذات الروابط المختلفة.")) return;
-    setCleaningDuplicates(true);
-    let removed = 0; let failed = 0;
-    for (const channel of duplicates) {
-      try { await api.deleteChannel(channel.id); removed++; } catch { failed++; }
+  // Read-only audit: never deletes, hides, probes or modifies any stream.
+  const audit = useMemo(() => {
+    const byUrl = new Map<string, Channel[]>();
+    const byName = new Map<string, Channel[]>();
+    const invalid: Channel[] = [];
+    for (const c of channels) {
+      const url = (c.streamUrl ?? "").trim();
+      const normalizedUrl = url.replace(/\/$/, "").toLowerCase();
+      const normalizedName = (c.name ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+      if (normalizedUrl) byUrl.set(normalizedUrl, [...(byUrl.get(normalizedUrl) ?? []), c]);
+      if (normalizedName) byName.set(normalizedName, [...(byName.get(normalizedName) ?? []), c]);
+      if (!url || !/^(https?:\/\/|rtmps?:\/\/|rtsp:\/\/|udp:\/\/|rtp:\/\/)/i.test(url)) invalid.push(c);
     }
-    setDuplicateMessage("حُذفت " + removed + " قناة مكررة، وفشل حذف " + failed + ".");
-    await refresh();
-    setCleaningDuplicates(false);
+    const sameUrl = [...byUrl.values()].filter((g) => g.length > 1);
+    const sameName = [...byName.values()].filter((g) => g.length > 1);
+    return { sameUrl, sameName, invalid };
+  }, [channels]);
+  const downloadAudit = () => {
+    const rows: string[][] = [["نوع الملاحظة", "اسم القناة", "معرف القناة", "المصدر", "رابط البث", "الحالة"]];
+    const add = (kind: string, c: Channel, status: string) => rows.push([kind, c.name, c.id, c.sourceId ?? "", c.streamUrl ?? "", status]);
+    audit.sameUrl.forEach((group) => group.forEach((c) => add("رابط مكرر", c, "لم يتم اختبار التشغيل")));
+    audit.sameName.forEach((group) => group.forEach((c) => add("اسم مكرر", c, "قد تكون مصادر بث مختلفة")));
+    audit.invalid.forEach((c) => add("رابط مفقود أو غير معروف البروتوكول", c, "يحتاج مراجعة يدوية"));
+    const csv = "\uFEFF" + rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = "smart-receiver-channel-audit.csv"; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const inGroup = (c: Channel, g: string) => (g === "all" ? true : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
   const visible = useMemo(() => {
@@ -178,7 +182,17 @@ export function App() {
       {tab === "live" && (
         <div className="layout">
           <section className="list">
-            <div className="hint"><button disabled={cleaningDuplicates} onClick={() => void cleanDuplicates()}>{cleaningDuplicates ? "جارٍ حذف المكرر..." : "تنظيف القنوات المكررة (" + duplicates.length + ")"}</button> {duplicateMessage}</div>
+            <div className="hint">
+              <button onClick={() => setShowAudit((v) => !v)}>{showAudit ? "إخفاء تقرير الفحص" : "فحص التكرارات والروابط — دون حذف"}</button>
+              {showAudit && <div role="region" aria-label="تقرير تدقيق القنوات" style={{ padding: 12, border: "1px solid #777", marginTop: 8 }}>
+                <strong>تقرير جميع القنوات المحمّلة من المصادر المتاحة (قراءة فقط)</strong>
+                <p>إجمالي القنوات: {channels.length} · مجموعات روابط مكررة: {audit.sameUrl.length} · مجموعات أسماء مكررة: {audit.sameName.length} · روابط مفقودة أو غير معروفة: {audit.invalid.length}</p>
+                <p>حالة التشغيل غير مفحوصة: {channels.length}. لا يمكن اعتبار الرابط متعطلًا دون اختبار بث موثوق؛ لم تُرسل طلبات اختبار ولم تُعدّل أي قناة.</p>
+                <button onClick={downloadAudit}>تنزيل تقرير CSV بالتفاصيل</button>
+                {audit.sameUrl.slice(0, 15).map((g, i) => <p key={"url"+i}>رابط مكرر ({g.length}): {g.map((c) => c.name).join("، ")}</p>)}
+                {audit.sameName.slice(0, 15).map((g, i) => <p key={"name"+i}>اسم مكرر ({g.length}): {g.map((c) => c.name).join("، ")}</p>)}
+              </div>}
+            </div>
             {recs.length > 0 && !hits && <p className="hint">{s.forYou}: {recs.map((id) => channels.find((c) => c.id === id)?.name).filter(Boolean).slice(0, 3).join(", ")}</p>}
             {visible.length === 0 && <p className="hint" role="status">{hits ? s.noResults : channels.length > 0 ? "" : !loaded ? s.loading : stats && stats.channels > 0 ? `${s.loading} (${stats.channels.toLocaleString()})` : stats ? `${s.savedZero} ${stats.catalog > 0 ? s.catalogReady.replace("{n}", stats.catalog.toLocaleString()) : s.noChannelsYet}` : s.noChannelsYet}</p>}
             {!hits && (
