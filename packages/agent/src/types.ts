@@ -35,7 +35,7 @@ export interface Tool {
   /** Filesystem paths touched by this call, checked against the sandbox. */
   paths?(args: Record<string, unknown>, ctx: ToolContext): string[];
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
-  group: "files" | "shell" | "system" | "desktop" | "mcp" | "agent";
+  group: "files" | "documents" | "shell" | "system" | "desktop" | "mcp" | "agent";
 }
 
 export interface ToolCall {

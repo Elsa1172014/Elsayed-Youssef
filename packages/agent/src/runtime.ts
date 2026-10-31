@@ -11,6 +11,7 @@ import { McpHub } from "./mcp/hub.js";
 import { AuditLog } from "./security/audit.js";
 import { PermissionEngine, type Approver } from "./security/permissions.js";
 import { desktopTools } from "./tools/desktop.js";
+import { educationTools } from "./education/tools.js";
 import { fileTools } from "./tools/files.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { runCommandTool } from "./tools/shell.js";
@@ -60,7 +61,7 @@ export async function createRuntime(opts: {
   const store = new TaskStore(join(home, "tasks.db"));
   const registry = new ToolRegistry();
 
-  for (const t of [...fileTools, runCommandTool, ...systemTools, webFetchTool]) registry.register(t);
+  for (const t of [...fileTools, ...educationTools, runCommandTool, ...systemTools, webFetchTool]) registry.register(t);
   if (process.platform === "win32") for (const t of desktopTools) registry.register(t);
 
   const permissions = new PermissionEngine(

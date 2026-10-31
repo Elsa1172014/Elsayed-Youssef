@@ -14,7 +14,30 @@ export interface McpServerConfig {
   readOnlyTools?: string[];
   /** Tools that change or send things externally; always high risk. */
   highRiskTools?: string[];
+  /**
+   * Argument-aware risk. First matching rule wins (case-insensitive); otherwise the tool-level
+   * classification (readOnlyTools / highRiskTools / default medium) applies.
+   */
+  riskRules?: RiskRule[];
   disabled?: boolean;
+}
+
+export interface RiskRule {
+  tool: string;
+  /** Argument name inspected, e.g. "action". */
+  arg: string;
+  /** Values (case-insensitive) that select this rule. */
+  in: string[];
+  risk: RiskLevel;
+}
+
+export function ruleRisk(cfg: McpServerConfig, tool: string, args: Record<string, unknown>): RiskLevel | undefined {
+  for (const r of cfg.riskRules ?? []) {
+    if (r.tool !== tool) continue;
+    const v = args[r.arg];
+    if (typeof v === "string" && r.in.some((x) => x.toLowerCase() === v.toLowerCase())) return r.risk;
+  }
+  return undefined;
 }
 
 export interface McpServerStatus {
@@ -99,7 +122,7 @@ export class McpHub {
       group: "mcp",
       description: `[MCP:${server}] ${t.description ?? t.name}`,
       inputSchema: normalizeSchema(t.inputSchema),
-      risk: () => risk,
+      risk: (a) => ruleRisk(cfg, t.name, a) ?? risk,
       describeCall: (a) => `MCP ${server}.${t.name}(${JSON.stringify(a).slice(0, 160)})`,
       run: async (a, ctx) => {
         const r = await client.callTool({ name: t.name, arguments: a }, undefined, { signal: ctx.signal });

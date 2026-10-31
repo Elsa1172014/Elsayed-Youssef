@@ -114,3 +114,28 @@ describe("web control center", () => {
     }
   }, 30000);
 });
+
+describe("argument-aware MCP risk", () => {
+  it("classifies by argument value, case-insensitively, before tool-level defaults", async () => {
+    const { ruleRisk } = await import("../src/mcp/hub.js");
+    const { windowsMcpPreset } = await import("../src/mcp/presets.js");
+    const cfg = windowsMcpPreset("C:\\mcp\\server.exe");
+    expect(ruleRisk(cfg, "process", { action: "List" })).toBe("low");
+    expect(ruleRisk(cfg, "process", { action: "KILL" })).toBe("high");
+    expect(ruleRisk(cfg, "window_management", { action: "close" })).toBe("high");
+    expect(ruleRisk(cfg, "app", { programPath: "notepad.exe" })).toBe("medium");
+    expect(ruleRisk(cfg, "app", { programPath: "powershell.exe" })).toBeUndefined(); // falls back to highRiskTools
+    expect(cfg.highRiskTools).toContain("app");
+  });
+
+  it("applies rules to a live MCP tool", async () => {
+    const env = makeEnv(new ScriptedProvider([{ content: "", toolCalls: [] }]));
+    const hub = new McpHub(env.registry, env.audit);
+    await hub.connect("echo", { command: process.execPath, args: [fixture], riskRules: [{ tool: "echo", arg: "text", in: ["safe"], risk: "low" }] });
+    const tool = env.registry.get("mcp__echo__echo")!;
+    const ctx = { signal: new AbortController().signal, cwd: env.work, trashDir: env.dir };
+    expect(tool.risk({ text: "SAFE" }, ctx)).toBe("low");
+    expect(tool.risk({ text: "other" }, ctx)).toBe("medium");
+    await hub.disconnectAll();
+  }, 30000);
+});

@@ -2,6 +2,7 @@
 import { createInterface } from "node:readline/promises";
 import { loadConfig, nexusHome } from "./config.js";
 import { createRuntime } from "./runtime.js";
+import { windowsMcpPreset } from "./mcp/presets.js";
 import { startServer } from "./server.js";
 import type { Approver } from "./security/permissions.js";
 
@@ -12,6 +13,7 @@ const HELP = `AI NEXUS agent
   nexus resume <id>         resume an interrupted task
   nexus mcp                 connect configured MCP servers and list their tools
   nexus tools               list available tools
+  nexus preset windows <exe> print the mcpServers entry for sbroenne/mcp-windows (with risk rules)
 Config: ${nexusHome()}/config.json   Audit log: ${nexusHome()}/audit.jsonl`;
 
 const terminalApprover: Approver = async (req) => {
@@ -74,6 +76,11 @@ async function main(): Promise<void> {
       for (const s of rt.hub.list()) console.log(`${s.connected ? "●" : "○"} ${s.name}${s.error ? "  (" + s.error + ")" : ""}\n   ${s.tools.join("\n   ")}`);
       if (rt.hub.list().length === 0) console.log(`No MCP servers configured. Add them under "mcpServers" in ${nexusHome()}/config.json`);
       await rt.close();
+      return;
+    }
+    case "preset": {
+      if (rest[0] !== "windows" || !rest[1]) return void console.log(HELP);
+      console.log(JSON.stringify({ mcpServers: { windows: windowsMcpPreset(rest[1]) } }, null, 2));
       return;
     }
     case "tools": {
