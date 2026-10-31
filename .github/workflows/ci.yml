@@ -4,6 +4,25 @@ on:
   push:
     branches: [main]
 jobs:
+  agent:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: packages/agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/agent/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
   core:
     runs-on: ubuntu-latest
     defaults:
