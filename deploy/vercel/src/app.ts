@@ -6,6 +6,7 @@ import { proxyKeyFromEnv, secretBoxFromEnv } from "../../../services/api/src/cry
 import { openDb } from "../../../services/api/src/openDb";
 import { createSafeFetch } from "../../../services/api/src/safeFetch";
 import { Store } from "../../../services/api/src/store";
+import { hubFromEnv, type Hub } from "../../../services/api/src/hub";
 
 // Serverless: no persistent containers, so keep one small pool per warm instance and build the app once.
 process.env.MIGRATIONS_DIR ??= fileURLToPath(new URL("./migrations", import.meta.url));
@@ -16,6 +17,7 @@ export interface Runtime {
   store: Store;
   auth: AuthService;
   app: ReturnType<typeof buildApp>;
+  hub?: Hub;
 }
 
 /** Startup failure tagged with the stage that failed, so a 503 tells the owner what to fix (never includes secrets). */
@@ -26,7 +28,7 @@ export class StartupError extends Error {
 }
 /** Strips connection strings and Neon/Vercel hostnames from an error message before it is shown to a visitor. */
 export const redact = (m: string) =>
-  m.replace(/postgres(ql)?:\/\/\S+/gi, "[url]").replace(/[a-z0-9.-]+\.(neon\.tech|vercel-storage\.com|aws\.neon\.tech)\b/gi, "[host]").slice(0, 300);
+  m.replace(/postgres(ql)?:\/\/\S+/gi, "[url]").replace(/[a-z0-9.-]+\.(supabase\.co|pooler\.supabase\.com)\b/gi, "[host]").replace(/[a-z0-9.-]+\.(neon\.tech|vercel-storage\.com|aws\.neon\.tech)\b/gi, "[host]").slice(0, 300);
 
 let runtime: Promise<Runtime> | undefined;
 export function getRuntime(): Promise<Runtime> {
@@ -46,6 +48,8 @@ export function getRuntime(): Promise<Runtime> {
     }
     const store = new Store(db);
     const auth = new AuthService(db);
+    // Entertainment Hub is optional: a Supabase problem must never take the main platform down.
+    const hub = await hubFromEnv().catch((e: Error) => { console.error("hub disabled:", redact(e.message)); return undefined; });
     const app = buildApp({
       store,
       auth,
@@ -56,9 +60,10 @@ export function getRuntime(): Promise<Runtime> {
       allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
       trustProxy: true, // Vercel's edge sets X-Forwarded-For
       model: modelFromEnv(),
+      hub,
     });
     await app.ready();
-    return { store, auth, app };
+    return { store, auth, app, hub };
   })();
   runtime.catch(() => (runtime = undefined)); // a failed cold start (e.g. DB down) must not be cached
   return runtime;

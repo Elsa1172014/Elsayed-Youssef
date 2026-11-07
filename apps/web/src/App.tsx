@@ -9,12 +9,13 @@ import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
 import { YouTubeView } from "./YouTubeView";
 import { WebSearchView } from "./WebSearchView";
+import { HubView } from "./HubView";
 import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
 import { ChannelTools } from "./ChannelTools";
 import { LEGAL_PLAYLISTS, collapseDuplicates, exactDuplicates, subGroupOf } from "./organize";
 import { alternativesFor, clearRecent, loadFavs, loadRecent, pushRecent, saveFavs } from "./tools";
 
-type Tab = "live" | "web" | "youtube" | "news" | "guide" | "catalog" | "premium" | "manage";
+type Tab = "live" | "hub" | "web" | "youtube" | "news" | "guide" | "catalog" | "premium" | "manage";
 
 // Packaged TV builds (Tizen/webOS) set VITE_API_BASE at build time; the web build uses the dev proxy / same origin.
 setBase((import.meta.env.VITE_API_BASE as string | undefined) ?? "");
@@ -268,12 +269,12 @@ export function App() {
 
   if (!signedIn) return <SignIn onDone={() => setSignedIn(true)} />;
 
-  const tabs: Tab[] = ["live", "web", "youtube", "news", "guide", "catalog", "premium", "manage"];
+  const tabs: Tab[] = ["live", "hub", "web", "youtube", "news", "guide", "catalog", "premium", "manage"];
   return (
     <div className="app" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <header>
         <h1>Smart Receiver</h1>
-        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "web" ? (lang === "ar" ? "🔎 بحث" : "🔎 Search") : x === "youtube" ? "▶ YouTube" : x === "news" ? "⚽ الرياضة والأخبار" : s[x]}</button>)}</nav>
+        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "hub" ? (lang === "ar" ? "🎬 الترفيه" : "🎬 Hub") : x === "web" ? (lang === "ar" ? "🔎 بحث" : "🔎 Search") : x === "youtube" ? "▶ YouTube" : x === "news" ? "⚽ الرياضة والأخبار" : s[x]}</button>)}</nav>
         <input
           type="search"
           name="channel-search"
@@ -395,6 +396,7 @@ export function App() {
         </div>
       )}
       <div className="page">
+        {tab === "hub" && <HubView onNavigate={setTab} />}
         {tab === "web" && <WebSearchView lang={lang} />}
         {tab === "youtube" && <YouTubeView />}
         {tab === "news" && <><SportsView channels={channels} onPlay={(c) => { playChannel(c); setTab("live"); }} /><SportsNewsView /></>}

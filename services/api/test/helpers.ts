@@ -1,3 +1,4 @@
+import type { Hub } from "../src/hub";
 import { randomBytes } from "node:crypto";
 import type { TextModel } from "../src/ai";
 import { buildApp } from "../src/app";
@@ -31,7 +32,7 @@ export function fakeFetcher(routes: Record<string, unknown>): SafeFetch & { call
 let shared: Awaited<ReturnType<typeof openDb>> | undefined;
 const TABLES = "users, sessions, user_sources, user_channels, guide_channels, programmes, watch_events, catalog_streams, catalog_channels, premium_channels, sync_state";
 
-export async function makeApp(routes: Record<string, unknown> = {}, opts: { allowedOrigins?: string[]; model?: TextModel; opener?: SafeOpen } = {}) {
+export async function makeApp(routes: Record<string, unknown> = {}, opts: { allowedOrigins?: string[]; model?: TextModel; opener?: SafeOpen; hub?: Hub } = {}) {
   const db = (shared ??= await openDb({} as NodeJS.ProcessEnv));
   await db.query(`TRUNCATE ${TABLES} RESTART IDENTITY CASCADE`);
   const store = new Store(db);
@@ -39,7 +40,7 @@ export async function makeApp(routes: Record<string, unknown> = {}, opts: { allo
   const secrets = aesSecretBox(randomBytes(32));
   const clock = { now: FIXED };
   const auth = new AuthService(db, () => clock.now);
-  const app = buildApp({ store, auth, authenticate: tokenAuthenticator(auth), secrets, fetcher, now: () => clock.now, allowedOrigins: opts.allowedOrigins, model: opts.model, opener: opts.opener });
+  const app = buildApp({ store, auth, authenticate: tokenAuthenticator(auth), secrets, fetcher, now: () => clock.now, allowedOrigins: opts.allowedOrigins, model: opts.model, opener: opts.opener, hub: opts.hub });
   alice.authorization = `Bearer ${(await auth.register("alice", PASSWORD)).token}`;
   bob.authorization = `Bearer ${(await auth.register("bob", PASSWORD)).token}`;
   return { app, store, db, fetcher, secrets, auth, clock };

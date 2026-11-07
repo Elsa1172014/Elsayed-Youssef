@@ -11,7 +11,7 @@ rmSync(out, { recursive: true, force: true });
 execFileSync("npm", ["run", "build", "--prefix", "../../apps/web", "--", "--outDir", `../../deploy/vercel/${out}/static`, "--emptyOutDir"], { stdio: "inherit" });
 
 const banner = "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);";
-for (const name of ["index", "cron"]) {
+for (const name of ["index", "cron", "hubCron"]) {
   const dir = `${out}/functions/api/${name}.func`;
   mkdirSync(dir, { recursive: true });
   await build({
@@ -54,7 +54,7 @@ writeFileSync(
         { handle: "filesystem" },
         { src: "/(?!api/).*", dest: "/index.html" },
       ],
-      crons: [{ path: "/api/cron", schedule: "0 3 * * *" }],
+      crons: [{ path: "/api/cron", schedule: "0 3 * * *" }, { path: "/api/hubCron", schedule: "30 4 * * *" }],
     },
     null,
     2,

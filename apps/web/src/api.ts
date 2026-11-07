@@ -54,6 +54,18 @@ export interface CatalogFilter {
   /** Comma-separated ISO country codes (an iptv-org region). */
   countries?: string;
 }
+export interface HubProviders { link?: string; flatrate?: { name: string; logo?: string }[]; free?: { name: string; logo?: string }[]; ads?: { name: string; logo?: string }[]; rent?: { name: string; logo?: string }[]; buy?: { name: string; logo?: string }[] }
+export interface HubTitle {
+  id: number; tmdbId: number; kind: "movie" | "tv"; title: string; originalTitle?: string; overview?: string; posterPath?: string; backdropPath?: string;
+  releaseDate?: string; voteAverage?: number; genres: string[]; providers: HubProviders; providersRegion?: string; trendingRank?: number; featured: boolean; licensedCount: number;
+}
+export interface HubPlaySource { id: number; label: string; url: string; kind: "hls" | "dash" | "mp4"; drmSystem?: "widevine" | "playready" | "fairplay" | "clearkey"; licenseUrl?: string }
+export interface HubAdminSource extends HubPlaySource { rightsHolder: string; licenseRef: string; validUntil?: string; enabled: boolean }
+export interface HubMatch { idEvent: string; idLeague: string; league?: string; sport?: string; homeTeam?: string; awayTeam?: string; homeBadge?: string; awayBadge?: string; eventTime?: string; venue?: string; status?: string; homeScore?: number; awayScore?: number; thumb?: string }
+export interface HubStatus { enabled: boolean; isAdmin: boolean; adminsConfigured?: boolean; region?: string; keys: { tmdb: boolean; sportsdbOwnKey: boolean; supabase: boolean } }
+export interface HubJob { id: number; job: string; trigger: string; startedAt?: string; finishedAt?: string; ok?: boolean; stats: Record<string, unknown>; error?: string }
+export interface HubError { id: number; at?: string; job?: string; source: string; message: string; context: Record<string, unknown> }
+export interface HubOverview { counts: { titles: number; licensed: number; leagues: number; events: number; errors24h: number }; jobs: HubJob[]; errors: HubError[]; leagues: { id: string; name: string; sport?: string; enabled: boolean }[]; keys: HubStatus["keys"]; region: string }
 export interface WebSearch {
   text: string;
   sources: { title: string; url: string }[];
@@ -207,6 +219,25 @@ export const api = {
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
   webSearch: (q: string, lang: "ar" | "en") => call<WebSearch>("/v1/ai/websearch", json("POST", { q, lang })),
+  hubStatus: () => call<HubStatus>("/v1/hub/status"),
+  hubTitles: (f: { kind?: "movie" | "tv"; q?: string; licensed?: boolean; offset?: number }) => {
+    const qs = new URLSearchParams({ offset: String(f.offset ?? 0), limit: "40" });
+    if (f.kind) qs.set("kind", f.kind); if (f.q) qs.set("q", f.q); if (f.licensed) qs.set("licensed", "1");
+    return call<{ items: HubTitle[]; total: number }>(`/v1/hub/titles?${qs}`);
+  },
+  hubTitle: (id: number) => call<HubTitle & { sources: HubPlaySource[] }>(`/v1/hub/titles/${id}`),
+  hubMatches: (range: "upcoming" | "recent", league?: string) => call<HubMatch[]>(`/v1/hub/matches?range=${range}${league ? `&league=${encodeURIComponent(league)}` : ""}`),
+  hubLeagues: () => call<{ id: string; name: string; sport?: string }[]>("/v1/hub/leagues"),
+  hubAdminOverview: () => call<HubOverview>("/v1/hub/admin/overview"),
+  hubAdminSync: (job: "tmdb" | "sports") => call<Record<string, unknown>>("/v1/hub/admin/sync", json("POST", { job })),
+  hubAdminSearchTmdb: (q: string) => call<{ tmdbId: number; kind: "movie" | "tv"; title: string; releaseDate?: string; posterPath?: string }[]>(`/v1/hub/admin/tmdb/search?q=${encodeURIComponent(q)}`),
+  hubAdminAddTitle: (kind: "movie" | "tv", tmdbId: number) => call<HubTitle>("/v1/hub/admin/titles", json("POST", { kind, tmdbId })),
+  hubAdminSources: (titleId: number) => call<HubAdminSource[]>(`/v1/hub/admin/titles/${titleId}/sources`),
+  hubAdminAddSource: (titleId: number, s: Record<string, unknown>) => call<HubAdminSource>(`/v1/hub/admin/titles/${titleId}/sources`, json("POST", s)),
+  hubAdminToggleSource: (id: number, enabled: boolean) => call<void>(`/v1/hub/admin/sources/${id}`, json("PATCH", { enabled })),
+  hubAdminDeleteSource: (id: number) => call<void>(`/v1/hub/admin/sources/${id}`, json("DELETE")),
+  hubAdminAddLeague: (id: string) => call<{ id: string; name: string }>("/v1/hub/admin/leagues", json("POST", { id })),
+  hubAdminRemoveLeague: (id: string) => call<void>(`/v1/hub/admin/leagues/${id}`, json("DELETE")),
   catalogMeta: () => call<CatalogMeta>("/v1/catalog/meta"),
   subtitle: (audio: string, mime: string, to: "ar" | "en" = "ar") => call<{ text: string }>("/v1/ai/subtitle", json("POST", { audio, mime, to })),
   stats: () => call<{ channels: number; sources: number; catalog: number }>("/v1/me/stats"),

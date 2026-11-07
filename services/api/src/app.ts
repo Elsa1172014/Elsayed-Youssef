@@ -1,7 +1,8 @@
 import { IPTV_ORG_API, syncIptvOrg } from "./jobs/catalog";
+import { registerHub, type Hub } from "./hub";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
-  assertPublicHttpUrl, fillCredentials, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
+  assertPublicHttpUrl, fillCredentials, parseHdHomeRunLineup, parseOpenWebifServices, receiverEndpoint, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
   identityName, looksLikeHlsManifest, matchOwnChannels, sameChannel, type ChannelIdentity, type Diagnosis, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
   xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
@@ -35,6 +36,8 @@ interface Deps {
   proxyKey?: Buffer;
   /** Base URL of the iptv-org API used by the in-app "Sync now" button (tests point it at a fake). */
   catalogApi?: string;
+  /** Entertainment Hub (Supabase schema "hub"); absent when SUPABASE_DB_URL is not configured. */
+  hub?: Hub;
   now?: () => Date;
 }
 
@@ -48,7 +51,7 @@ interface Creds {
   password: string;
 }
 
-export function buildApp({ store, auth, authenticate, secrets, fetcher, opener = createSafeOpen(), proxyKey = randomProxyKey(), allowedOrigins = [], trustProxy = false, model, catalogApi, now = () => new Date() }: Deps): FastifyInstance {
+export function buildApp({ store, auth, authenticate, secrets, fetcher, opener = createSafeOpen(), proxyKey = randomProxyKey(), allowedOrigins = [], trustProxy = false, model, catalogApi, hub, now = () => new Date() }: Deps): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: MAX_BODY_BYTES, trustProxy });
   // Browsers/clients often send `content-type: application/json` on body-less POST/DELETE; Fastify's default parser
   // answers that with 400 "Bad Request". Treat an empty body as {} and keep the default parser (with its
@@ -123,6 +126,8 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     await auth.logout(bearerToken(req)!);
     return reply.code(204).send();
   });
+
+  registerHub(app, { hub, uidOf, usernameOf: async (uid) => (await auth.me(uid))?.username });
 
   app.get("/v1/me", async (req, reply) => (await auth.me(uidOf(req))) ?? bad(reply, "Not found", 404));
 
@@ -254,6 +259,16 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
         else for (const e of parseM3U(text).entries) {
           await addNew({ name: e.name, streamUrl: e.url, logoUrl: e.tvgLogo, group: e.groupTitle, epgChannelId: e.tvgId });
         }
+      } else if (src.type === "tuner" && src.url) {
+        // Receiver library through the receiver's own API (HDHomeRun lineup.json / Enigma2 OpenWebif).
+        const ep = receiverEndpoint(src.url);
+        const res = await fetcher(ep.url, { signal: AbortSignal.timeout(20_000) });
+        if (!res.ok) return bad(reply, `Receiver returned HTTP ${res.status}`, 502);
+        let data: unknown;
+        try { data = JSON.parse(await res.text()); } catch { return bad(reply, "The receiver did not return JSON: check the address (HDHomeRun …/lineup.json or an OpenWebif box)", 502); }
+        const list = ep.kind === "hdhomerun" ? parseHdHomeRunLineup(data) : parseOpenWebifServices(data, src.url);
+        if (!list.length) return bad(reply, "The receiver returned no playable channels", 502);
+        for (const c of list) await addNew({ name: c.name, streamUrl: c.url, group: c.group ?? src.name });
       } else if (src.type === "xmltv" && src.url) {
         const res = await fetcher(src.url, { signal: AbortSignal.timeout(25_000) });
         if (!res.ok) return bad(reply, `Source returned HTTP ${res.status}`, 502);
