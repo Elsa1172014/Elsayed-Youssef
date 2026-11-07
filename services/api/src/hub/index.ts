@@ -2,6 +2,7 @@ import type { Db } from "../db";
 import { ArchiveClient, SportsDbClient, TmdbClient, type Fetch } from "./clients";
 import type { Hub } from "./routes";
 import { HubStore } from "./store";
+import { McpStore } from "../mcp/store";
 
 export { registerHub, type Hub } from "./routes";
 export { runHubCron, syncArchive, syncSports, syncTmdb, DEFAULT_LEAGUES } from "./jobs";
@@ -42,6 +43,8 @@ export async function hubFromEnv(env: Record<string, string | undefined> = proce
     store: new HubStore(db),
     clients: { tmdb: tmdbKey ? new TmdbClient(tmdbKey, opts.fetch) : undefined, sports: new SportsDbClient(sportsKey, opts.fetch), archive: new ArchiveClient(opts.fetch), region: (env.HUB_REGION || "AE").toUpperCase().slice(0, 2) },
     admins: (env.HUB_ADMIN_USERS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean),
+    mcp: new McpStore(db),
+    publicUrl: (env.PUBLIC_URL || "https://elsayed-youssef-vercel.vercel.app").replace(/\/$/, ""),
     keys: { tmdb: !!tmdbKey, sportsdbOwnKey: !!env.THESPORTSDB_KEY && sportsKey !== "123" && sportsKey !== "3", supabase: true },
   };
 }

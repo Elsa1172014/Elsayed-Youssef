@@ -105,6 +105,16 @@ export function App() {
     void api.me().then((m) => setUsername(m.username)).catch(() => undefined);
   }, [signedIn, refresh]);
 
+  // Watch links from the Global IPTV MCP (…/?play=<channelId>): open that channel once the list has loaded, then clean the URL.
+  const [playParam, setPlayParam] = useState(() => { try { return new URLSearchParams(location.search).get("play") ?? ""; } catch { return ""; } });
+  useEffect(() => {
+    if (!playParam || !channels.length) return;
+    const c = channels.find((x) => x.id === playParam);
+    if (c) { setTab("live"); playChannel(c); }
+    setPlayParam("");
+    try { history.replaceState(null, "", location.pathname); } catch { /* ignore */ }
+  }, [playParam, channels, playChannel]);
+
   // Channels can be added from other tabs (catalog, premium, manage) or other devices: reload when opening Live/Guide/Manage.
   useEffect(() => {
     if (signedIn && (tab === "live" || tab === "guide" || tab === "manage")) void refresh();

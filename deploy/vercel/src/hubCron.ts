@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { runHubCron } from "../../../services/api/src/hub";
-import { getRuntime, redact } from "./app";
+import { runMcpSync } from "../../../services/api/src/mcp";
+import { getMcpRuntime, getRuntime, redact } from "./app";
 
 const authorized = (header: string | undefined): boolean => {
   const secret = process.env.CRON_SECRET;
@@ -23,7 +24,15 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   try {
     const { hub } = await getRuntime();
     if (!hub) return send(200, { skipped: "SUPABASE_DB_URL not configured" });
-    send(200, await runHubCron(hub.store, hub.clients));
+    const started = Date.now();
+    const result = await runHubCron(hub.store, hub.clients);
+    // Global IPTV MCP auto-sync with whatever time is left of the 60 s budget.
+    let mcp: unknown = { skipped: "no time left" };
+    if (hub.mcp && Date.now() - started < 40_000) {
+      const m = await getMcpRuntime();
+      mcp = await runMcpSync(hub.store, hub.mcp, (uid) => m.apiFor(m.app, uid), { deadline: started + 55_000 });
+    }
+    send(200, { ...result, mcp });
   } catch (e) {
     console.error("hub cron failed:", redact((e as Error).message));
     send(500, { error: redact((e as Error).message) });

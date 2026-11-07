@@ -5,8 +5,9 @@ import { LEGAL_PLAYLISTS } from "./organize";
 import { Player } from "./Player";
 import { HubAdmin } from "./HubAdmin";
 import { HubPlayer } from "./HubPlayer";
+import { McpPanel } from "./McpPanel";
 
-type Section = "library" | "channels" | "matches" | "receiver" | "iptv" | "admin";
+type Section = "library" | "channels" | "matches" | "receiver" | "iptv" | "mcp" | "admin";
 const IMG = "https://image.tmdb.org/t/p/";
 const poster = (t: HubTitle, size = "w342") => t.posterUrl ?? (t.posterPath ? `${IMG}${size}${t.posterPath}` : undefined);
 const fmtTime = (iso?: string) => (iso ? new Intl.DateTimeFormat("ar", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—");
@@ -19,6 +20,7 @@ export function HubView({ onNavigate, channels, refresh }: { onNavigate: (tab: "
   useEffect(() => { void api.hubStatus().then(setStatus).catch((e: Error) => setErr(e.message)); }, []);
 
   const sections: [Section, string][] = [["library", "🎬 أفلام ومسلسلات"], ["channels", "📺 قنوات الأفلام"], ["matches", "⚽ المباريات"], ["receiver", "📡 مكتبة الرسيفر"], ["iptv", "🌍 قنوات IPTV-org"]];
+  if (status?.enabled) sections.push(["mcp", "🔌 MCP"]);
   if (status?.isAdmin) sections.push(["admin", "🛠 لوحة الإدارة"]);
 
   return (
@@ -38,6 +40,7 @@ export function HubView({ onNavigate, channels, refresh }: { onNavigate: (tab: "
       {section === "matches" && status?.enabled && <Matches />}
       {section === "receiver" && <Receiver onNavigate={onNavigate} />}
       {section === "iptv" && <Iptv onNavigate={onNavigate} />}
+      {section === "mcp" && status?.enabled && <McpPanel />}
       {section === "admin" && status?.isAdmin && <HubAdmin />}
       <footer className="hub-credits">
         الأفلام الكلاسيكية المجانية من أرشيف الإنترنت (archive.org) بترخيص ملكية عامة أو Creative Commons. بيانات الأفلام والمسلسلات من TMDB — هذا المنتج يستخدم واجهة TMDB البرمجية لكنه غير معتمد من TMDB. بيانات «أين تشاهد» مقدَّمة من JustWatch. بيانات المباريات من TheSportsDB. القنوات المفتوحة من دليل iptv-org.

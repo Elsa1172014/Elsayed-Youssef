@@ -219,6 +219,10 @@ export const api = {
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
   webSearch: (q: string, lang: "ar" | "en") => call<WebSearch>("/v1/ai/websearch", json("POST", { q, lang })),
+  mcpInfo: () => call<{ endpoint: string; tokens: { id: number; label: string; autoSync: boolean; createdAt?: string; lastUsedAt?: string }[] }>("/v1/hub/mcp"),
+  mcpCreateToken: (label: string) => call<{ token: string; info: { id: number; label: string } }>("/v1/hub/mcp/tokens", json("POST", { label })),
+  mcpRevokeToken: (id: number) => call<void>(`/v1/hub/mcp/tokens/${id}`, json("DELETE")),
+  mcpAutoSync: (id: number, autoSync: boolean) => call<void>(`/v1/hub/mcp/tokens/${id}`, json("PATCH", { autoSync })),
   hubStatus: () => call<HubStatus>("/v1/hub/status"),
   hubTitles: (f: { kind?: "movie" | "tv"; source?: "tmdb" | "archive" | "own"; q?: string; licensed?: boolean; offset?: number }) => {
     const qs = new URLSearchParams({ offset: String(f.offset ?? 0), limit: "40" });

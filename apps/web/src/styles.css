@@ -143,3 +143,5 @@ html.tv-mode .player .subs p{font-size:2rem}
 .hub-chlist button.active{border-color:#3abfff;background:#14467a}.hub-chlist img,.hub-chlist .ph{grid-row:1/3;width:40px;height:40px;object-fit:contain;display:grid;place-items:center;background:#12304e;border-radius:8px}
 .hub-chlist small{color:var(--sr-muted);font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hub textarea{width:100%;box-sizing:border-box;background:#0b2038;color:var(--sr-text);border:1px solid var(--sr-border);border-radius:10px;padding:10px;font:inherit}
+.mcp-fresh{display:grid;gap:8px;background:#0f3a24;border:1px solid #1a9d4b;border-radius:12px;padding:12px}.mcp-fresh code{word-break:break-all;font-size:.9rem}
+.mcp-code{background:#061321;border:1px solid var(--sr-border);border-radius:10px;padding:10px;overflow-x:auto;font-size:.8rem;white-space:pre-wrap;word-break:break-all;text-align:left}

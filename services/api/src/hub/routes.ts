@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { syncArchive, syncSports, syncTmdb, type HubClients } from "./jobs";
 import type { HubStore } from "./store";
+import type { McpStore } from "../mcp/store";
 
 export interface Hub {
   store: HubStore;
@@ -10,6 +11,10 @@ export interface Hub {
   admins: string[];
   /** Which provider keys are configured (booleans only — values never leave the server). */
   keys: { tmdb: boolean; sportsdbOwnKey: boolean; supabase: boolean };
+  /** Global IPTV MCP tokens, favourites and checks (same Supabase schema). */
+  mcp?: McpStore;
+  /** Public base URL of the site (for the MCP endpoint and watch links). */
+  publicUrl?: string;
 }
 
 const DRM = ["widevine", "playready", "fairplay", "clearkey"] as const;
@@ -72,6 +77,34 @@ export function registerHub(
 
   app.get("/v1/hub/leagues", async (_req, reply) => (needHub(reply) ? hub!.store.leagues(true) : undefined));
 
+  // ---------------- Global IPTV MCP: per-user tokens ----------------
+  app.get("/v1/hub/mcp", async (req, reply) => {
+    if (!needHub(reply)) return;
+    if (!hub!.mcp) return bad(reply, "MCP is not enabled", 503);
+    return { endpoint: `${hub!.publicUrl ?? ""}/mcp`, tokens: await hub!.mcp.listTokens(deps.uidOf(req)) };
+  });
+
+  /** The raw token is returned once; only its SHA-256 is stored. */
+  app.post("/v1/hub/mcp/tokens", async (req, reply) => {
+    if (!needHub(reply)) return;
+    if (!hub!.mcp) return bad(reply, "MCP is not enabled", 503);
+    const uid = deps.uidOf(req);
+    if ((await hub!.mcp.listTokens(uid)).length >= 5) return bad(reply, "You already have 5 active tokens; revoke one first", 409);
+    const r = await hub!.mcp.createToken(uid, text(body(req).label, 60) ?? "MCP");
+    return reply.code(201).header("cache-control", "no-store").send(r);
+  });
+
+  app.delete("/v1/hub/mcp/tokens/:id", async (req, reply) => {
+    if (!needHub(reply) || !hub!.mcp) return;
+    return (await hub!.mcp.revokeToken(deps.uidOf(req), Number((req.params as { id: string }).id))) ? reply.code(204).send() : bad(reply, "Not found", 404);
+  });
+
+  app.patch("/v1/hub/mcp/tokens/:id", async (req, reply) => {
+    if (!needHub(reply) || !hub!.mcp) return;
+    await hub!.mcp.setAutoSync(deps.uidOf(req), Number((req.params as { id: string }).id), body(req).autoSync === true);
+    return reply.code(204).send();
+  });
+
   // ---------------- admin ----------------
   app.get("/v1/hub/admin/overview", async (req, reply) => {
     if (!(await needAdmin(req, reply))) return;
@@ -83,6 +116,7 @@ export function registerHub(
     if (!(await needAdmin(req, reply))) return;
     const job = body(req).job;
     if (job !== "tmdb" && job !== "sports" && job !== "archive") return bad(reply, "job must be tmdb, sports or archive");
+    // (mcp-sync runs from the cron with in-process API access; see deploy/vercel/src/hubCron.ts)
     return job === "tmdb" ? syncTmdb(hub!.store, hub!.clients, "manual") : job === "sports" ? syncSports(hub!.store, hub!.clients, "manual") : syncArchive(hub!.store, hub!.clients, "manual");
   });
 

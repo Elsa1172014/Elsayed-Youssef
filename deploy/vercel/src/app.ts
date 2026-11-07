@@ -7,6 +7,7 @@ import { openDb } from "../../../services/api/src/openDb";
 import { createSafeFetch } from "../../../services/api/src/safeFetch";
 import { Store } from "../../../services/api/src/store";
 import { hubFromEnv, type Hub } from "../../../services/api/src/hub";
+import { internalIdentity } from "../../../services/api/src/mcp";
 
 // Serverless: no persistent containers, so keep one small pool per warm instance and build the app once.
 process.env.MIGRATIONS_DIR ??= fileURLToPath(new URL("./migrations", import.meta.url));
@@ -67,4 +68,24 @@ export function getRuntime(): Promise<Runtime> {
   })();
   runtime.catch(() => (runtime = undefined)); // a failed cold start (e.g. DB down) must not be cached
   return runtime;
+}
+
+/**
+ * Global IPTV MCP: a private copy of the API (same store/auth/hub) authenticated by an in-process identity,
+ * used by /mcp and the MCP part of the hub cron. Never bound to a port.
+ */
+let mcpRuntime: Promise<{ app: ReturnType<typeof buildApp>; apiFor: ReturnType<typeof internalIdentity>["apiFor"]; hub?: Hub }> | undefined;
+export function getMcpRuntime() {
+  mcpRuntime ??= (async () => {
+    const rt = await getRuntime();
+    const id = internalIdentity();
+    const app = buildApp({
+      store: rt.store, auth: rt.auth, authenticate: id.authenticate, secrets: secretBoxFromEnv(), fetcher: createSafeFetch(),
+      proxyKey: proxyKeyFromEnv(), trustProxy: true, model: modelFromEnv(), hub: rt.hub,
+    });
+    await app.ready();
+    return { app, apiFor: id.apiFor, hub: rt.hub };
+  })();
+  mcpRuntime.catch(() => (mcpRuntime = undefined));
+  return mcpRuntime;
 }
