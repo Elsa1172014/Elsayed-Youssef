@@ -54,6 +54,12 @@ export interface CatalogFilter {
   /** Comma-separated ISO country codes (an iptv-org region). */
   countries?: string;
 }
+export interface WebSearch {
+  text: string;
+  sources: { title: string; url: string }[];
+  queries: string[];
+  suggestionsHtml?: string;
+}
 export interface CatalogMeta {
   regions: { code: string; name: string; countries: string[] }[];
   countries: Record<string, { name: string; flag: string }>;
@@ -200,6 +206,7 @@ export const api = {
     return { items: (await res.json()) as CatalogEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
+  webSearch: (q: string, lang: "ar" | "en") => call<WebSearch>("/v1/ai/websearch", json("POST", { q, lang })),
   catalogMeta: () => call<CatalogMeta>("/v1/catalog/meta"),
   subtitle: (audio: string, mime: string, to: "ar" | "en" = "ar") => call<{ text: string }>("/v1/ai/subtitle", json("POST", { audio, mime, to })),
   stats: () => call<{ channels: number; sources: number; catalog: number }>("/v1/me/stats"),

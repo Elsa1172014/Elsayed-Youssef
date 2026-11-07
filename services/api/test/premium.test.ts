@@ -139,6 +139,15 @@ describe("AI helpers", () => {
     expect((await silent.app.inject({ method: "POST", url: "/v1/ai/subtitle", headers: alice, payload: { audio: clipB64, mime: "audio/mp4" } })).json()).toEqual({ text: "" });
   });
 
+  it("answers web searches through a search-capable model only", async () => {
+    const textOnly = await makeApp({}, { model: { complete: async () => "x" } });
+    expect((await textOnly.app.inject({ method: "POST", url: "/v1/ai/websearch", headers: alice, payload: { q: "أخبار" } })).statusCode).toBe(503);
+    const { app } = await makeApp({}, { model: { complete: async () => "x", search: async (_s, q) => ({ text: `نتيجة: ${q}`, sources: [{ title: "Example", url: "https://example.org" }], queries: [q] }) } });
+    const r = await app.inject({ method: "POST", url: "/v1/ai/websearch", headers: alice, payload: { q: "طقس دبي", lang: "ar" } });
+    expect(r.json()).toMatchObject({ text: "نتيجة: طقس دبي", sources: [{ url: "https://example.org" }], queries: ["طقس دبي"] });
+    expect((await app.inject({ method: "POST", url: "/v1/ai/websearch", headers: alice, payload: {} })).statusCode).toBe(400);
+  });
+
   it("finds similar channels among the user's own", async () => {
     const { app } = await makeApp();
     const add = async (name: string, group: string) => (await app.inject({ method: "POST", url: "/v1/me/channels", headers: alice, payload: { name, group, streamUrl: `https://example.org/${name.length}${group}.m3u8` } })).json();

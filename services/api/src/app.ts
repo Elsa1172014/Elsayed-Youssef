@@ -5,7 +5,7 @@ import {
   identityName, looksLikeHlsManifest, matchOwnChannels, sameChannel, type ChannelIdentity, type Diagnosis, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
   xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
-import { clip, EXPLAIN_SYSTEM, LANGS, plainSummary, SUMMARY_SYSTEM, SUBTITLE_SYSTEM, TRANSLATE_SYSTEM, type Lang, type TextModel } from "./ai";
+import { clip, EXPLAIN_SYSTEM, LANGS, plainSummary, SUMMARY_SYSTEM, SUBTITLE_SYSTEM, TRANSLATE_SYSTEM, WEBSEARCH_SYSTEM, type Lang, type TextModel } from "./ai";
 import { AuthError, bearerToken, type AuthService, type Authenticator } from "./auth";
 import { AttemptLimiter } from "./rateLimit";
 import type { SecretBox } from "./crypto";
@@ -732,6 +732,22 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
       return { text: await model.complete(TRANSLATE_SYSTEM(langOf(b.to)), text, 800), to: langOf(b.to) };
     } catch {
       return bad(reply, "Translation failed, try again later", 502);
+    }
+  });
+
+  /** General web search through Google Search grounding (Gemini). Uses the shared AI hourly limit. */
+  app.post("/v1/ai/websearch", async (req, reply) => {
+    const uid = uidOf(req);
+    const b = body(req);
+    const q = str(b.q, 300);
+    if (!q) return bad(reply, "q is required (max 300 characters)");
+    if (!model?.search) return bad(reply, "Web search needs GEMINI_API_KEY on the server", 503);
+    if (!aiGate(uid, reply)) return;
+    try {
+      const r = await model.search(WEBSEARCH_SYSTEM(langOf(b.lang ?? "ar")), q, 700);
+      return { ...r, text: clip(r.text, 4000) };
+    } catch {
+      return bad(reply, "Web search failed, try again later", 502);
     }
   });
 

@@ -100,3 +100,10 @@ html.tv-mode{font-size:21px}html.tv-mode header{padding:18px 26px;gap:14px}html.
 html.tv-mode .player .subs p{font-size:2rem}
 .player .engines{position:absolute;top:48px;inset-inline-end:8px;z-index:6;display:grid;gap:4px;background:#0a1d33f2;border:1px solid #2b577a;border-radius:12px;padding:10px;min-width:200px;color:#fff}
 .player .engines button{text-align:start;padding:7px 10px}.player .engines button.on{border-color:#3abfff;background:#14467a}.player .engines small{color:var(--sr-muted)}
+/* Web search (Google via Gemini) */
+.websearch{max-width:900px;margin:16px auto;display:grid;gap:12px}
+.ws-bar{display:flex;gap:8px}.ws-bar input{flex:1;font-size:1.05rem;padding:12px}.ws-bar .primary{background:linear-gradient(120deg,#126db8,#249fe5);font-weight:600}
+.ws-history{display:flex;flex-wrap:wrap;gap:6px}.ws-history button,.ws-history .btn{font-size:.85rem;padding:5px 10px;border-radius:999px;text-decoration:none;border:1px solid var(--sr-border);background:var(--sr-surface2);color:var(--sr-text)}
+.ws-result{background:#0b1e34;border:1px solid var(--sr-border);border-radius:var(--sr-radius);padding:16px}.ws-result h3{margin:0 0 8px}.ws-result h4{margin:14px 0 6px;color:var(--sr-muted)}
+.ws-answer p{margin:6px 0;line-height:1.75}.ws-sources{margin:0;padding-inline-start:22px;display:grid;gap:4px}.ws-sources a{color:#7cc8ff}
+.ws-suggest{width:100%;height:96px;border:0;margin-top:10px;border-radius:10px;background:#fff}
