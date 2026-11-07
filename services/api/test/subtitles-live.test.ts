@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TextModel } from "../src/ai";
 import type { SafeOpen } from "../src/safeFetch";
-import { parseMedia, pickSegment, pickVariant } from "../src/subtitles/hls";
+import { parseMedia, pickSegment, pickVariant, pickWindow } from "../src/subtitles/hls";
 import { extractTsAudio } from "../src/subtitles/tsAudio";
 import { alice, makeApp } from "./helpers";
 
@@ -54,6 +54,16 @@ describe("HLS segment picking", () => {
     expect(pickSegment(p, 105)).toBeUndefined(); // not published yet
     expect(pickSegment(p, 50)?.seq).toBe(102); // fell behind: jump back near live
   });
+  it("builds ~9 s windows near the live point and jumps forward instead of lagging", () => {
+    const p = parseMedia(media, "https://cdn.example.org/live/index.m3u8"); // 6 × 6 s, seq 100..105
+    expect(pickWindow(p, undefined).map((x) => x.seq)).toEqual([101, 102]); // ends 3 segments before the edge
+    expect(pickWindow(p, 102).map((x) => x.seq)).toEqual([103, 104]); // continues seamlessly
+    expect(pickWindow(p, 90).map((x) => x.seq)).toEqual([101, 102]); // fell behind: back to the live point
+    expect(pickWindow(p, 105)).toEqual([]); // nothing new yet
+    const short = parseMedia("#EXTM3U\n#EXT-X-TARGETDURATION:2\n" + Array.from({ length: 12 }, (_, i) => `#EXTINF:2,\ns${i}.ts`).join("\n"), "https://x.org/");
+    expect(pickWindow(short, undefined).length).toBe(5); // 2 s segments are merged up to ≥9 s
+  });
+
   it("picks the lowest-bandwidth variant and flags encryption", () => {
     expect(pickVariant("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=3000000\nhi.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=400000\nlo.m3u8", "https://x.org/a/master.m3u8")).toBe("https://x.org/a/lo.m3u8");
     expect(parseMedia('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="k"\n#EXTINF:6,\na.ts', "https://x.org/").encrypted).toBe(true);
@@ -83,10 +93,10 @@ describe("server-side live subtitles endpoint", () => {
     const { app } = await makeApp({}, { opener, model });
     const id = await add(app, "https://cdn.example.org/live/master.m3u8");
     const first = (await app.inject({ method: "POST", url: `/v1/me/channels/${id}/subtitle-live`, headers: alice, payload: {} })).json();
-    expect(first).toMatchObject({ text: "مرحبًا بكم في نشرة الأخبار", seq: 8, duration: 6 });
-    expect(heard.at(-1)).toEqual({ mime: "audio/aac", bytes: aac.length }); // only the audio track is sent
-    const next = (await app.inject({ method: "POST", url: `/v1/me/channels/${id}/subtitle-live`, headers: alice, payload: { after: 8 } })).json();
-    expect(next.seq).toBe(9);
+    expect(first).toMatchObject({ text: "مرحبًا بكم في نشرة الأخبار", seq: 8, duration: 12, wait: 12 });
+    expect(heard.at(-1)).toEqual({ mime: "audio/aac", bytes: aac.length * 2 }); // two segments' audio, nothing else
+    const next = (await app.inject({ method: "POST", url: `/v1/me/channels/${id}/subtitle-live`, headers: alice, payload: { after: 8, prev: "مرحبًا" } })).json();
+    expect(next.seq).toBe(10);
   });
 
   it("refuses encrypted/DRM streams and non-HLS sources with a client fallback hint", async () => {

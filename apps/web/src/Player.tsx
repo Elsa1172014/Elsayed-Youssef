@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { detectStreamKind, type Engine, type StreamKind } from "./core";
 import { forgetSource, recallSource, startEngine, type Handle } from "./engine";
-import { findArabicTrack, showTrack, startLiveSubtitles, startServerSubtitles } from "./subtitles";
+import { findArabicTrack, showTrack, splitSubtitle, startLiveSubtitles, startServerSubtitles } from "./subtitles";
 
 /** Asks the relay why it refused (offline, geo-blocked, ...) so the viewer sees a reason instead of a spinner. */
 async function relayReason(proxyUrl: string): Promise<string> {
@@ -48,17 +48,22 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
     if (track) { showTrack(video, track); setSubNote("ترجمة عربية مدمجة في البث"); return () => showTrack(video, undefined); }
     setSubNote("الترجمة الفورية تعمل… تظهر بعد ثوانٍ من الكلام");
     let clearT: ReturnType<typeof setTimeout> | undefined;
-    const show = (text: string) => {
+    // Each answer covers ~10 s of speech: show its sentences one after another across that time, then clear.
+    let steps: ReturnType<typeof setTimeout>[] = [];
+    const show = (text: string, seconds = 6) => {
       if (!text) return;
       setSubNote("");
-      setSubLines((l) => [...l, text].slice(-2));
+      steps.forEach(clearTimeout);
       clearTimeout(clearT);
-      clearT = setTimeout(() => setSubLines([]), 12000);
+      const parts = splitSubtitle(text);
+      const each = Math.max(2.5, seconds / parts.length) * 1000;
+      steps = parts.map((p, i) => setTimeout(() => setSubLines([p]), i * each));
+      clearT = setTimeout(() => setSubLines([]), parts.length * each + 1500);
     };
     // 1) Server-side (HLS, every device incl. iPhone). 2) In-browser audio capture for other streams.
     let stopClient: (() => void) | undefined;
     const stopServer = startServerSubtitles(channelId, show, (m) => setSubNote(m), () => { stopClient = startLiveSubtitles(video, show, (m) => setSubNote(m)); });
-    return () => { stopServer(); stopClient?.(); clearTimeout(clearT); };
+    return () => { stopServer(); stopClient?.(); clearTimeout(clearT); steps.forEach(clearTimeout); };
   }, [subsOn, playingNow, channelId]);
   const pipOk = typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled;
   useEffect(() => { if (error) onFailed?.(); }, [error]); // eslint-disable-line react-hooks/exhaustive-deps

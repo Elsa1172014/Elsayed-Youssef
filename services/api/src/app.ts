@@ -1,6 +1,6 @@
 import { IPTV_ORG_API, syncIptvOrg } from "./jobs/catalog";
 import { registerHub, type Hub } from "./hub";
-import { isMaster as isMasterPlaylist, parseMedia as parseMediaPlaylist, pickSegment, pickVariant } from "./subtitles/hls";
+import { isMaster as isMasterPlaylist, parseMedia as parseMediaPlaylist, pickVariant, pickWindow } from "./subtitles/hls";
 import { extractTsAudio } from "./subtitles/tsAudio";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
@@ -831,27 +831,31 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
       return unsupported(`stream unreachable from the server (${(e as Error).message})`);
     }
     if (media.encrypted) return unsupported("encrypted stream: not decrypted");
-    const seg = pickSegment(media, after);
-    if (!seg) return { text: "", seq: after, wait: Math.max(1, Math.round(media.targetDuration / 2)) };
+    const win = pickWindow(media, after);
+    if (!win.length) return { text: "", seq: after, wait: Math.max(1, Math.round(media.targetDuration / 2)) };
+    const lastSeg = win[win.length - 1]!;
+    const windowSeconds = win.reduce((n, x) => n + x.duration, 0);
     subtitleLimiter.fail(uid);
     const waitFor = subtitleLimiter.blockedFor(uid);
     if (waitFor) return reply.header("retry-after", waitFor).code(429).send({ error: "Subtitle limit reached for this hour" });
     let audio: { data: Buffer; mime: string } | undefined;
     try {
+      const parts = await Promise.all(win.map((x) => readAll(x.url, 12_000_000)));
       if (media.map) {
         const init = await readAll(media.map, 2_000_000);
-        const data = Buffer.concat([init, await readAll(seg.url, 12_000_000)]);
-        audio = { data, mime: "video/mp4" };
+        audio = { data: Buffer.concat([init, parts[0]!]), mime: "video/mp4" }; // fragments of one track, playable from the init segment
       } else {
-        audio = extractTsAudio(await readAll(seg.url, 12_000_000));
+        const tracks = parts.map((x) => extractTsAudio(x)).filter((x): x is NonNullable<typeof x> => !!x);
+        audio = tracks.length ? { data: Buffer.concat(tracks.map((t) => t.data)), mime: tracks[0]!.mime } : undefined; // ADTS/MP3 frames concatenate cleanly
       }
     } catch (e) {
       return unsupported(`segment unreachable (${(e as Error).message})`);
     }
     if (!audio) return unsupported("no supported audio track in this stream");
     try {
-      const text = await model.listen(SUBTITLE_SYSTEM(langOf(b.to ?? "ar")), audio.data.toString("base64"), audio.mime, 200);
-      return { text: text === "-" || text === "—" ? "" : clip(text, 300), seq: seg.seq, duration: seg.duration, wait: Math.max(1, Math.round(seg.duration * 0.8)) };
+      const prev = typeof b.prev === "string" ? b.prev.slice(0, 200) : undefined;
+      const text = await model.listen(SUBTITLE_SYSTEM(langOf(b.to ?? "ar"), prev), audio.data.toString("base64"), audio.mime, 300);
+      return { text: text === "-" || text === "—" ? "" : clip(text, 400), seq: lastSeg.seq, duration: windowSeconds, wait: Math.max(2, Math.round(windowSeconds)) };
     } catch {
       return bad(reply, "Subtitle request failed", 502);
     }

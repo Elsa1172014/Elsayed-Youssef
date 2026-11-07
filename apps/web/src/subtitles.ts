@@ -117,35 +117,58 @@ export function startLiveSubtitles(video: HTMLVideoElement, onText: (text: strin
   };
 }
 
+/** Splits a window's translation into readable sentences, to show one after another across the window. */
+export function splitSubtitle(text: string): string[] {
+  const parts = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?؟。…])\s+|(?<=[،,;؛])\s+(?=\S{2,}\s+\S+\s+\S+)/u).map((x) => x.trim()).filter(Boolean);
+  const out: string[] = [];
+  for (const p of parts) {
+    const last = out[out.length - 1];
+    if (last && (last.length + p.length < 70)) out[out.length - 1] = `${last} ${p}`; else out.push(p);
+  }
+  return out.length ? out : [text];
+}
+
 /**
- * Server-side live subtitles (HLS): the server reads the segment being watched and translates its audio.
- * Works on every device, including iPhone/Safari. Resolves "fallback" when the stream needs the in-browser method.
+ * Server-side live subtitles (HLS): every ~window the server translates the latest ~9–12 s of the channel's audio,
+ * near the point being watched. Requests overlap (max 2 in flight) so a slow answer never makes the subtitles fall
+ * behind; out-of-date answers are dropped. Works on every device, including iPhone/Safari.
  */
-export function startServerSubtitles(channelId: string, onText: (text: string) => void, onError: (message: string) => void, onFallback: () => void): () => void {
+export function startServerSubtitles(channelId: string, onText: (text: string, seconds: number) => void, onError: (message: string) => void, onFallback: () => void): () => void {
   let stopped = false;
   let after: number | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let shownSeq = -1;
+  let prev: string | undefined;
+  let inFlight = 0;
   let failures = 0;
-  const tick = async () => {
-    if (stopped) return;
+  let period = 10;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = (why?: () => void) => { stopped = true; clearTimeout(timer); why?.(); };
+  const request = async () => {
+    inFlight++;
     try {
-      const r = await api.subtitleLive(channelId, after);
+      const r = await api.subtitleLive(channelId, after, prev);
       if (stopped) return;
       failures = 0;
-      if (r.seq !== undefined) after = r.seq;
-      if (r.text) onText(r.text);
-      timer = setTimeout(() => void tick(), Math.max(1, r.wait ?? 4) * 1000);
+      if (r.wait) period = Math.min(Math.max(r.wait, 4), 20);
+      if (r.seq === undefined || r.seq <= shownSeq) return; // late answer for a window already shown
+      shownSeq = r.seq;
+      after = r.seq;
+      if (r.text) { prev = r.text; onText(r.text, r.duration ?? period); }
     } catch (e) {
       if (stopped) return;
       const m = (e as Error).message;
-      if (/not an HLS|no supported audio|unreachable|no playable/i.test(m)) { stopped = true; onFallback(); return; }
-      if (/encrypted/i.test(m)) { stopped = true; onError("هذه القناة مشفّرة، ولا تُترجم لأن صوتها محمي."); return; }
-      if (/limit|429/i.test(m)) { stopped = true; onError("انتهى حدّ الترجمة لهذه الساعة. حاول لاحقًا."); return; }
-      if (/GEMINI|503/i.test(m)) { stopped = true; onError("الترجمة تحتاج مفتاح Gemini على الخادم."); return; }
-      if (++failures >= 3) { stopped = true; onError("تعذّرت الترجمة لهذه القناة الآن."); return; }
-      timer = setTimeout(() => void tick(), 4000);
-    }
+      if (/not an HLS|no supported audio|unreachable|no playable/i.test(m)) return stop(onFallback);
+      if (/encrypted/i.test(m)) return stop(() => onError("هذه القناة مشفّرة، ولا تُترجم لأن صوتها محمي."));
+      if (/limit|429/i.test(m)) return stop(() => onError("انتهى حدّ الترجمة لهذه الساعة. حاول لاحقًا."));
+      if (/GEMINI|503/i.test(m)) return stop(() => onError("الترجمة تحتاج مفتاح Gemini على الخادم."));
+      if (++failures >= 4) return stop(() => onError("تعذّرت الترجمة لهذه القناة الآن."));
+    } finally { inFlight--; }
   };
-  void tick();
-  return () => { stopped = true; clearTimeout(timer); };
+  const loop = () => {
+    if (stopped) return;
+    if (inFlight < 2) void request();
+    timer = setTimeout(loop, period * 1000);
+  };
+  loop();
+  return () => stop();
 }

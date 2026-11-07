@@ -56,3 +56,26 @@ export function pickSegment(p: MediaPlaylist, after?: number): MediaSegment | un
   }
   return p.segments[Math.max(0, p.segments.length - 4)];
 }
+
+/**
+ * A ~`minSeconds` window of consecutive segments to subtitle in one go (longer windows → whole sentences → better
+ * translations). Always anchored near the live point the viewer is watching (≈3 segments behind the edge): if the
+ * previous window is older than that, it jumps forward instead of falling further behind.
+ */
+export function pickWindow(p: MediaPlaylist, after: number | undefined, minSeconds = 9): MediaSegment[] {
+  const segs = p.segments;
+  if (!segs.length) return [];
+  const per = Math.max(1, segs[0]!.duration || p.targetDuration);
+  const span = Math.max(1, Math.ceil(minSeconds / per));
+  const anchor = Math.max(0, segs.length - 3 - span); // window ends ≈3 segments before the live edge
+  let start = anchor;
+  if (after !== undefined) {
+    const i = segs.findIndex((s) => s.seq === after + 1);
+    if (i < 0 && segs[segs.length - 1]!.seq <= after) return []; // nothing new yet
+    if (i >= anchor) start = i; // keep continuity only while we are not behind the live point
+  }
+  const out: MediaSegment[] = [];
+  let total = 0;
+  for (let k = start; k < segs.length && (total < minSeconds || out.length === 0); k++) { out.push(segs[k]!); total += segs[k]!.duration; }
+  return total >= minSeconds || !p.live ? out : out.length >= span ? out : [];
+}

@@ -245,7 +245,7 @@ export const api = {
   hubAdminAddLeague: (id: string) => call<{ id: string; name: string }>("/v1/hub/admin/leagues", json("POST", { id })),
   hubAdminRemoveLeague: (id: string) => call<void>(`/v1/hub/admin/leagues/${id}`, json("DELETE")),
   catalogMeta: () => call<CatalogMeta>("/v1/catalog/meta"),
-  subtitleLive: (channelId: string, after?: number, to: "ar" | "en" = "ar") => call<{ text: string; seq?: number; duration?: number; wait?: number }>(`/v1/me/channels/${channelId}/subtitle-live`, json("POST", { after, to })),
+  subtitleLive: (channelId: string, after?: number, prev?: string, to: "ar" | "en" = "ar") => call<{ text: string; seq?: number; duration?: number; wait?: number }>(`/v1/me/channels/${channelId}/subtitle-live`, json("POST", { after, prev, to })),
   subtitle: (audio: string, mime: string, to: "ar" | "en" = "ar") => call<{ text: string }>("/v1/ai/subtitle", json("POST", { audio, mime, to })),
   stats: () => call<{ channels: number; sources: number; catalog: number }>("/v1/me/stats"),
   syncStatus: () => call<{ running: boolean; channels: number; lastSync: { at: string; channels: number; streams: number; premium: number } | null }>("/v1/catalog/sync"),
