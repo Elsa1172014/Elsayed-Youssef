@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, type CatalogEntry, type CatalogFilter, type Channel, type Facet, type Facets, type Grid, type PremiumEntry, type Source, type Suggestion } from "./api";
+import { api, type CatalogEntry, type CatalogFilter, type CatalogMeta, type Channel, type Facet, type Facets, type Grid, type PremiumEntry, type Source, type Suggestion } from "./api";
 import { AiButton } from "./AiPanel";
 import type { Lang, Strings } from "./i18n";
 
 type Run = (fn: () => Promise<unknown>) => Promise<void>;
 
 /** Name of the Live group created by "add all", from the active filters (e.g. "iptv-org · Arabic · sports"). */
-const groupName = (f: CatalogFilter) => ["iptv-org", f.arabic && "Arabic", f.europe && "Europe", f.country, f.category, f.language, f.q && `“${f.q}”`].filter(Boolean).join(" · ");
+const groupName = (f: CatalogFilter, region?: string) => ["iptv-org", region, f.arabic && "Arabic", f.europe && "Europe", f.country, f.category, f.language, f.q && `“${f.q}”`].filter(Boolean).join(" · ");
 
 export function GuideView({ channels }: { channels: Channel[] }) {
   const [grid, setGrid] = useState<Grid>({});
@@ -74,7 +74,21 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
   const [total, setTotal] = useState(0);
   const [result, setResult] = useState("");
   const [tick, setTick] = useState(0);
+  const [meta, setMeta] = useState<CatalogMeta | null>(null);
+  const [region, setRegion] = useState("");
   useEffect(() => { void api.facets().then(setFacets).catch(() => setFacets(null)); }, [tick]);
+  useEffect(() => { void api.catalogMeta().then(setMeta).catch(() => setMeta(null)); }, []);
+  const regionObj = meta?.regions.find((r) => r.code === region);
+  const pickRegion = (code: string) => {
+    setRegion(code);
+    const r = meta?.regions.find((x) => x.code === code);
+    setF({ ...f, countries: r ? r.countries.join(",") : undefined, country: undefined });
+  };
+  // Full names (and flags) from the iptv-org reference data; raw codes when it is unavailable.
+  const nameOf = (key: "country" | "category" | "language", v: string) =>
+    key === "country" ? (meta?.countries[v] ? `${meta.countries[v]!.flag} ${meta.countries[v]!.name}` : v)
+      : key === "language" ? meta?.languages[v] ?? v
+      : meta?.categories[v] ?? v;
   useEffect(() => {
     const h = setTimeout(() => void api.catalog(f).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => setItems([])), 250);
     return () => clearTimeout(h);
@@ -82,7 +96,7 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
   const sel = (key: keyof CatalogFilter, label: string, list: Facet[] | undefined) => (
     <select aria-label={label} value={f[key] ?? ""} onChange={(e) => setF({ ...f, [key]: e.target.value || undefined })}>
       <option value="">{label}</option>
-      {(list ?? []).map((x) => <option key={x.value} value={x.value}>{x.value} ({x.count})</option>)}
+      {(list ?? []).filter((x) => key !== "country" || !regionObj || regionObj.countries.includes(x.value)).map((x) => <option key={x.value} value={x.value}>{nameOf(key as "country" | "category" | "language", x.value)} ({x.count})</option>)}
     </select>
   );
   return (
@@ -91,6 +105,12 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
       <SyncBar s={s} onDone={() => setTick((t) => t + 1)} />
       <div className="filters">
         <input value={f.q ?? ""} onChange={(e) => setF({ ...f, q: e.target.value || undefined })} placeholder={s.search} />
+        {meta && meta.regions.length > 0 && (
+          <select aria-label="المنطقة" value={region} onChange={(e) => pickRegion(e.target.value)}>
+            <option value="">كل المناطق (iptv-org)</option>
+            {[...meta.regions].sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.code} value={r.code}>{r.name} ({r.countries.length})</option>)}
+          </select>
+        )}
         {sel("country", s.country, facets?.countries)}
         {sel("category", s.category, facets?.categories)}
         {sel("language", s.language, facets?.languages)}
@@ -101,7 +121,7 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
         <strong>{total.toLocaleString()}</strong> {s.channelsFound}{" "}
         <button disabled={total === 0} onClick={() => {
           if (!window.confirm(`${s.addAll}: ${Math.min(total, 20000)}?`)) return;
-          void run(async () => { const r = await api.importCatalog(f, groupName(f)); setResult(`${r.added} ${s.added}, ${r.skipped} ${s.skipped}`); await refresh(); });
+          void run(async () => { const r = await api.importCatalog(f, groupName(f, regionObj?.name)); setResult(`${r.added} ${s.added}, ${r.skipped} ${s.skipped}`); await refresh(); });
         }}>{s.addAll}</button>{" "}
         <button disabled={total === 0} onClick={() => void run(async () => {
           const url = URL.createObjectURL(new Blob([await api.exportCatalogM3U(f)], { type: "audio/x-mpegurl" }));
@@ -112,7 +132,7 @@ export function CatalogView({ s, run, refresh }: { s: Strings; run: Run; refresh
       <ul>
         {items.map((c) => (
           <li key={c.id} className="cat">
-            <span><strong>{c.name}</strong> <small>{[c.country, c.categories[0], c.languages[0]].filter(Boolean).join(" · ")}</small></span>
+            <span><strong>{c.name}</strong> <small>{[c.country && nameOf("country", c.country), c.categories[0] && nameOf("category", c.categories[0]), c.languages[0] && nameOf("language", c.languages[0])].filter(Boolean).join(" · ")}</small></span>
             <button onClick={() => void run(async () => { await api.addFromCatalog(c.id); await refresh(); })}>{s.addToMine}</button>
           </li>
         ))}

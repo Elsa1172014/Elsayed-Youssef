@@ -1,4 +1,4 @@
-import { syncIptvOrg } from "./jobs/catalog";
+import { IPTV_ORG_API, syncIptvOrg } from "./jobs/catalog";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   assertPublicHttpUrl, fillCredentials, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
@@ -550,7 +550,35 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
   });
 
   // ---- Free catalog (official / FAST / open directory) ----
-  const filterOf = (q: Record<string, string | undefined>) => ({ q: q.q, country: q.country, category: q.category, language: q.language, arabic: q.arabic, europe: q.europe });
+  const filterOf = (q: Record<string, string | undefined>) => ({ q: q.q, country: q.country, category: q.category, language: q.language, arabic: q.arabic, europe: q.europe, countries: q.countries });
+
+  // iptv-org reference data (regions, country names + flags, language and category names). Read-only, cached 12 h in memory.
+  let metaCache: { at: number; data: unknown } | undefined;
+  const metaBase = (catalogApi ?? IPTV_ORG_API).replace(/\/$/, "");
+  app.get("/v1/catalog/meta", async (_req, reply) => {
+    if (metaCache && now().getTime() - metaCache.at < 12 * 3600_000) return metaCache.data;
+    const get = async <T,>(name: string): Promise<T[]> => {
+      try {
+        const res = await fetcher(`${metaBase}/${name}.json`);
+        return res.status === 200 ? ((JSON.parse(await res.text()) as T[]) ?? []) : [];
+      } catch { return []; }
+    };
+    const [regions, countries, languages, categories] = await Promise.all([
+      get<{ code: string; name: string; countries: string[] }>("regions"),
+      get<{ code: string; name: string; flag?: string }>("countries"),
+      get<{ code: string; name: string }>("languages"),
+      get<{ id: string; name: string }>("categories"),
+    ]);
+    if (!regions.length && !countries.length) return bad(reply, "iptv-org reference data is unavailable right now", 502);
+    const data = {
+      regions: regions.filter((r) => r.code && r.name && Array.isArray(r.countries)).map((r) => ({ code: r.code, name: r.name, countries: r.countries })),
+      countries: Object.fromEntries(countries.filter((c) => c.code).map((c) => [c.code, { name: c.name, flag: c.flag ?? "" }])),
+      languages: Object.fromEntries(languages.filter((l) => l.code).map((l) => [l.code, l.name])),
+      categories: Object.fromEntries(categories.filter((c) => c.id).map((c) => [c.id, c.name])),
+    };
+    metaCache = { at: now().getTime(), data };
+    return data;
+  });
 
   app.get("/v1/catalog", async (req, reply) => {
     const q = req.query as Record<string, string | undefined>;
@@ -601,7 +629,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
    */
   app.post("/v1/catalog/import", async (req, reply) => {
     const b = body(req);
-    const f = filterOf(Object.fromEntries(["q", "country", "category", "language", "arabic", "europe"].map((k) => [k, typeof b[k] === "string" ? (b[k] as string) : undefined])));
+    const f = filterOf(Object.fromEntries(["q", "country", "category", "language", "arabic", "europe", "countries"].map((k) => [k, typeof b[k] === "string" ? (b[k] as string) : undefined])));
     const limit = Number.isInteger(b.limit) && (b.limit as number) > 0 ? Math.min(b.limit as number, 20_000) : 1_000;
     const uid = uidOf(req);
     // Channels added from the catalog land in a named group (e.g. "iptv-org · Arabic · sports") so they show up as their own chip in Live.

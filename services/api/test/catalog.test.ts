@@ -39,6 +39,28 @@ describe("catalog", () => {
     expect((await app.inject({ method: "POST", url: "/v1/catalog/B.us/add", headers: alice })).statusCode).toBe(404);
   });
 
+  it("serves iptv-org regions/countries/languages/categories and filters the catalog by a region's countries", async () => {
+    const meta = {
+      [`${API}/regions.json`]: [{ code: "GCC", name: "Gulf Cooperation Council", countries: ["SA", "AE", "QA", "KW", "BH", "OM"] }],
+      [`${API}/countries.json`]: [{ code: "QA", name: "Qatar", flag: "🇶🇦" }],
+      [`${API}/languages.json`]: [{ code: "ara", name: "Arabic" }],
+      [`${API}/categories.json`]: [{ id: "news", name: "News" }],
+    };
+    const { app, store, fetcher } = await makeApp({ ...BL, ...meta, [`${API}/channels.json`]: channels, [`${API}/streams.json`]: streams });
+    await syncIptvOrg(store, fetcher);
+    const m = (await app.inject({ url: "/v1/catalog/meta", headers: alice })).json();
+    expect(m.regions[0]).toMatchObject({ code: "GCC", countries: expect.arrayContaining(["QA"]) });
+    expect(m.countries.QA).toEqual({ name: "Qatar", flag: "🇶🇦" });
+    expect(m.languages.ara).toBe("Arabic");
+    expect(m.categories.news).toBe("News");
+    const calls = fetcher.calls.length;
+    await app.inject({ url: "/v1/catalog/meta", headers: alice });
+    expect(fetcher.calls.length).toBe(calls); // cached
+    const gcc = (await app.inject({ url: "/v1/catalog?countries=SA,AE,QA,KW,BH,OM", headers: alice })).json();
+    expect(gcc.map((c: { id: string }) => c.id)).toEqual(["A.qa"]);
+    expect((await app.inject({ url: "/v1/catalog?countries=zz;drop", headers: alice })).json()).toHaveLength(2); // junk codes are ignored
+  });
+
   it("loads the curated official list and rejects invalid entries", async () => {
     const { store } = await makeApp();
     const r = await syncOfficial(store, [
