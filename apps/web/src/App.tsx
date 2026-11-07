@@ -396,7 +396,7 @@ export function App() {
         </div>
       )}
       <div className="page">
-        {tab === "hub" && <HubView onNavigate={setTab} />}
+        {tab === "hub" && <HubView onNavigate={setTab} channels={channels} refresh={refresh} />}
         {tab === "web" && <WebSearchView lang={lang} />}
         {tab === "youtube" && <YouTubeView />}
         {tab === "news" && <><SportsView channels={channels} onPlay={(c) => { playChannel(c); setTab("live"); }} /><SportsNewsView /></>}

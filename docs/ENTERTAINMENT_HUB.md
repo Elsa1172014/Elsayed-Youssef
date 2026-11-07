@@ -10,6 +10,9 @@ Additive module: the rest of the platform behaves exactly as before when the Hub
 | Matches | TheSportsDB v1 | Followed leagues are managed in the admin panel |
 | Receiver library | HDHomeRun `lineup.json`, Enigma2 OpenWebif `/api/getallservices`, or an authorised M3U export | Device-flagged protected channels are skipped; the server only reaches public https addresses |
 | Open channels | iptv-org (existing catalog) | Blocklist and NSFW exclusions unchanged |
+| Free classic films | Internet Archive (archive.org) | Only items whose own metadata declares a public-domain mark, CC0 or Creative Commons licence; up to 15 new films per daily run; licence and source page shown to viewers |
+| Movie channels | iptv-org movies/series + Free-TV (Pluto TV, Samsung TV Plus, …) | One-click import, embedded player |
+| Own films | Admin form, https link + rights attestation | Stored as source `own` |
 | Player | Shaka Player (HLS, DASH, Widevine/PlayReady/FairPlay/ClearKey with official licences) | |
 
 ## Data (Supabase, schema `hub`)

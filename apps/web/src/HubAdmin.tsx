@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type HubAdminSource, type HubOverview, type HubTitle } from "./api";
 
 const when = (iso?: string) => (iso ? new Intl.DateTimeFormat("ar", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—");
-const JOBS: Record<string, string> = { tmdb: "تحديث الأفلام والمسلسلات (TMDB)", sports: "تحديث المباريات (TheSportsDB)" };
+const JOBS: Record<string, string> = { tmdb: "تحديث الأفلام والمسلسلات (TMDB)", sports: "تحديث المباريات (TheSportsDB)", archive: "تحميل أفلام كلاسيكية مجانية (أرشيف الإنترنت)" };
 
 /** Arabic, responsive admin panel for the Entertainment Hub (HUB_ADMIN_USERS only — enforced by the server). */
 export function HubAdmin() {
@@ -22,7 +22,7 @@ export function HubAdmin() {
     <section className="hub-admin">
       {msg && <p className="error" role="alert">{msg}</p>}
       <div className="hub-stats">
-        {([["العناوين", ov.counts.titles], ["مصادر مرخّصة", ov.counts.licensed], ["الدوريات", ov.counts.leagues], ["مباريات قادمة", ov.counts.events], ["أخطاء 24 ساعة", ov.counts.errors24h]] as const).map(([l, n]) => (
+        {([["العناوين", ov.counts.titles], ["أفلام مجانية", ov.counts.openFilms ?? 0], ["مصادر مرخّصة", ov.counts.licensed], ["الدوريات", ov.counts.leagues], ["مباريات قادمة", ov.counts.events], ["أخطاء 24 ساعة", ov.counts.errors24h]] as const).map(([l, n]) => (
           <div key={l} className={l === "أخطاء 24 ساعة" && n > 0 ? "stat warn" : "stat"}><b>{n.toLocaleString("ar")}</b><span>{l}</span></div>
         ))}
       </div>
@@ -41,7 +41,7 @@ export function HubAdmin() {
           <h4>التحديثات المجدولة</h4>
           <p className="hint">تعمل تلقائيًا يوميًا الساعة 04:30 UTC (08:30 بتوقيت دبي).</p>
           <div className="ctools-row">
-            {(["tmdb", "sports"] as const).map((j) => (
+            {(["archive", "tmdb", "sports"] as const).map((j) => (
               <button key={j} disabled={!!busy} onClick={() => void run(j, () => api.hubAdminSync(j))}>{busy === j ? "جارٍ التحديث…" : `تشغيل الآن: ${JOBS[j]}`}</button>
             ))}
           </div>
@@ -73,6 +73,7 @@ export function HubAdmin() {
         )}
       </div>
 
+      <OwnFilm run={run} busy={busy} />
       <Leagues ov={ov} run={run} busy={busy} />
       <Titles run={run} busy={busy} />
     </section>
@@ -157,6 +158,37 @@ function Titles({ run, busy }: { run: (l: string, fn: () => Promise<unknown>) =>
           })}>حفظ المصدر</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function OwnFilm({ run, busy }: { run: (l: string, fn: () => Promise<unknown>) => Promise<void>; busy: string }) {
+  const empty = { title: "", url: "", posterUrl: "", overview: "", year: "", kind: "movie", rightsHolder: "", licenseRef: "" };
+  const [f, setF] = useState(empty);
+  const [attest, setAttest] = useState(false);
+  const [done, setDone] = useState("");
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const ok = attest && f.title.trim() && /^https:\/\//.test(f.url.trim()) && f.rightsHolder.trim() && (!f.posterUrl || /^https:\/\//.test(f.posterUrl.trim()));
+  return (
+    <div className="hub-block">
+      <h4>⭐ إضافة فيلم من أفلامي</h4>
+      <p className="hint">أضف فيلمًا تملكه أو لديك حق عرضه برابط https مباشر لملف الفيديو (MP4 أو m3u8 أو mpd)، مثل رابط من خدمة استضافة فيديو تملك حسابها. يظهر في المكتبة ضمن «أفلامي» ويعمل فورًا.</p>
+      <div className="hub-form">
+        <input value={f.title} onChange={set("title")} placeholder="اسم الفيلم" />
+        <input value={f.url} onChange={set("url")} placeholder="رابط الفيديو https://…" dir="ltr" />
+        <input value={f.posterUrl} onChange={set("posterUrl")} placeholder="رابط صورة الغلاف https://… (اختياري)" dir="ltr" />
+        <input value={f.year} onChange={(e) => setF({ ...f, year: e.target.value.replace(/\D/g, "").slice(0, 4) })} placeholder="سنة الإنتاج (اختياري)" inputMode="numeric" />
+        <select value={f.kind} onChange={set("kind")}><option value="movie">فيلم</option><option value="tv">حلقة / مسلسل</option></select>
+        <input value={f.rightsHolder} onChange={set("rightsHolder")} placeholder="صاحب الحقوق (أنت أو الجهة المرخِّصة)" />
+        <input value={f.licenseRef} onChange={set("licenseRef")} placeholder="مرجع الترخيص (اختياري)" />
+      </div>
+      <textarea value={f.overview} onChange={set("overview")} placeholder="نبذة عن الفيلم (اختياري)" rows={2} />
+      <label className="hub-attest"><input type="checkbox" checked={attest} onChange={(e) => setAttest(e.target.checked)} /> أقرّ بأنني أملك هذا الفيلم أو لديّ حق عرضه.</label>
+      <button className="primary" disabled={!ok || !!busy} onClick={() => void run("own", async () => {
+        const t = await api.hubAdminAddOwn({ ...f, year: f.year ? Number(f.year) : undefined, posterUrl: f.posterUrl.trim() || undefined, licenseRef: f.licenseRef.trim() || undefined });
+        setDone(`أُضيف «${t.title}» إلى المكتبة.`); setF(empty); setAttest(false);
+      })}>حفظ الفيلم</button>
+      {done && <p className="hint" role="status">{done}</p>}
     </div>
   );
 }

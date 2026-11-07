@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { syncSports, syncTmdb, type HubClients } from "./jobs";
+import { randomUUID } from "node:crypto";
+import { syncArchive, syncSports, syncTmdb, type HubClients } from "./jobs";
 import type { HubStore } from "./store";
 
 export interface Hub {
@@ -48,7 +49,8 @@ export function registerHub(
     if (!needHub(reply)) return;
     const q = req.query as Record<string, string | undefined>;
     const kind = q.kind === "movie" || q.kind === "tv" ? q.kind : undefined;
-    return hub!.store.listTitles({ kind, q: text(q.q, 80), licensedOnly: q.licensed === "1", limit: Number(q.limit) || 40, offset: Number(q.offset) || 0 });
+    const source = q.source === "tmdb" || q.source === "archive" || q.source === "own" ? q.source : undefined;
+    return hub!.store.listTitles({ kind, source, q: text(q.q, 80), licensedOnly: q.licensed === "1", limit: Number(q.limit) || 40, offset: Number(q.offset) || 0 });
   });
 
   app.get("/v1/hub/titles/:id", async (req, reply) => {
@@ -80,8 +82,8 @@ export function registerHub(
   app.post("/v1/hub/admin/sync", async (req, reply) => {
     if (!(await needAdmin(req, reply))) return;
     const job = body(req).job;
-    if (job !== "tmdb" && job !== "sports") return bad(reply, "job must be tmdb or sports");
-    return job === "tmdb" ? syncTmdb(hub!.store, hub!.clients, "manual") : syncSports(hub!.store, hub!.clients, "manual");
+    if (job !== "tmdb" && job !== "sports" && job !== "archive") return bad(reply, "job must be tmdb, sports or archive");
+    return job === "tmdb" ? syncTmdb(hub!.store, hub!.clients, "manual") : job === "sports" ? syncSports(hub!.store, hub!.clients, "manual") : syncArchive(hub!.store, hub!.clients, "manual");
   });
 
   app.get("/v1/hub/admin/tmdb/search", async (req, reply) => {
@@ -108,6 +110,30 @@ export function registerHub(
       await hub!.store.setProviders(id, await hub!.clients.tmdb.watchProviders(kind, tmdbId, hub!.clients.region), hub!.clients.region);
     } catch (e) { await hub!.store.logError("tmdb", (e as Error).message, { tmdbId }, "admin"); }
     return reply.code(201).send(await hub!.store.getTitle(id));
+  });
+
+  /** The operator's own film (or one licensed to them), added by an https link with the rights attested. */
+  app.post("/v1/hub/admin/own-titles", async (req, reply) => {
+    if (!(await needAdmin(req, reply))) return;
+    const b = body(req);
+    if (b.rightsAttested !== true) return bad(reply, "Confirm that you own this film or hold the rights to show it");
+    const title = text(b.title, 200);
+    const url = https(b.url);
+    const kind = b.kind === "tv" ? "tv" : "movie";
+    const posterUrl = b.posterUrl ? https(b.posterUrl, 1000) : undefined;
+    const rightsHolder = text(b.rightsHolder, 120);
+    const licenseRef = text(b.licenseRef, 200) ?? "Owner";
+    if (!title || !url || !rightsHolder) return bad(reply, "title, an https url and rightsHolder are required");
+    if (b.posterUrl && !posterUrl) return bad(reply, "posterUrl must be https");
+    const year = Number(b.year);
+    const play = { label: text(b.label, 80) ?? "مشاهدة", url, kind: (/\.mpd(\?|$)/i.test(url) ? "dash" : /\.m3u8(\?|$)/i.test(url) ? "hls" : "mp4") as "hls" | "dash" | "mp4", rightsHolder, licenseRef, createdBy: (await deps.usernameOf(deps.uidOf(req))) ?? "admin" };
+    const id = await hub!.store.upsertOpenTitle({ source: "own", externalId: randomUUID(), kind, title, overview: text(b.overview, 1500), posterUrl, releaseYear: year > 1880 && year < 2100 ? year : undefined, genres: ["أفلامي"], play });
+    return reply.code(201).send(await hub!.store.getTitle(id));
+  });
+
+  app.delete("/v1/hub/admin/titles/:id", async (req, reply) => {
+    if (!(await needAdmin(req, reply))) return;
+    return (await hub!.store.deleteTitle(Number((req.params as { id: string }).id))) ? reply.code(204).send() : bad(reply, "Not found", 404);
   });
 
   app.get("/v1/hub/admin/titles/:id/sources", async (req, reply) => {

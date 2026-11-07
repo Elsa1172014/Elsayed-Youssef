@@ -162,3 +162,78 @@ export class SportsDbClient {
     return (r.events ?? []).map(SportsDbClient.map).filter((x): x is SportsEvent => !!x);
   }
 }
+
+export interface OpenFilm {
+  identifier: string;
+  title: string;
+  description?: string;
+  year?: number;
+  runtimeMin?: number;
+  licenseUrl: string;
+  videoUrl: string;
+  posterUrl: string;
+  pageUrl: string;
+}
+
+/** Public domain mark, CC0 and Creative Commons licences only. Anything else (or no licence field) is rejected. */
+export const isOpenLicense = (url: unknown): url is string =>
+  typeof url === "string" && /^https?:\/\/(www\.)?creativecommons\.org\/(publicdomain\/(mark|zero)\/|licenses\/(by|by-sa|by-nd|by-nc|by-nc-sa|by-nc-nd)\/)/i.test(url.trim());
+
+const ARCHIVE_COLLECTIONS = ["feature_films", "classic_cartoons", "film_noir", "SciFi_Horror", "Comedy_Films", "silent_films", "animationandcartoons", "documentaries"];
+
+/**
+ * Internet Archive (archive.org) public search + metadata APIs. Only items whose own metadata declares a public-domain
+ * or Creative Commons licence are used; the licence URL is stored with every film and shown to viewers.
+ */
+export class ArchiveClient {
+  constructor(private readonly f: Fetch = fetch) {}
+
+  private async json<T>(url: string): Promise<T> {
+    const res = await this.f(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`archive.org → HTTP ${res.status}`);
+    return (await res.json()) as T;
+  }
+
+  /** One page of candidate films, most-viewed first. */
+  async search(page: number, rows = 40): Promise<{ identifier: string; licenseUrl: string }[]> {
+    const q = `mediatype:(movies) AND collection:(${ARCHIVE_COLLECTIONS.join(" OR ")}) AND licenseurl:(*creativecommons.org*)`;
+    const u = new URL("https://archive.org/advancedsearch.php");
+    u.searchParams.set("q", q);
+    for (const f of ["identifier", "licenseurl"]) u.searchParams.append("fl[]", f);
+    u.searchParams.append("sort[]", "downloads desc");
+    u.searchParams.set("rows", String(rows));
+    u.searchParams.set("page", String(page));
+    u.searchParams.set("output", "json");
+    const r = await this.json<{ response?: { docs?: { identifier?: string; licenseurl?: string | string[] }[] } }>(u.toString());
+    return (r.response?.docs ?? [])
+      .map((d) => ({ identifier: String(d.identifier ?? ""), licenseUrl: Array.isArray(d.licenseurl) ? d.licenseurl[0] ?? "" : d.licenseurl ?? "" }))
+      .filter((d) => /^[\w.-]+$/.test(d.identifier) && isOpenLicense(d.licenseUrl));
+  }
+
+  /** Full item: title, description, year, runtime and the best browser-playable MP4 (H.264). */
+  async film(identifier: string): Promise<OpenFilm | undefined> {
+    if (!/^[\w.-]+$/.test(identifier)) return undefined;
+    const r = await this.json<{ metadata?: Record<string, unknown>; files?: { name?: string; format?: string; size?: string }[] }>(`https://archive.org/metadata/${identifier}`);
+    const m = r.metadata ?? {};
+    const one = (v: unknown) => (Array.isArray(v) ? v[0] : v);
+    const license = String(one(m.licenseurl) ?? "");
+    if (!isOpenLicense(license)) return undefined; // re-check on the item itself, never trust the search index alone
+    const mp4s = (r.files ?? []).filter((f) => f.name && /\.mp4$/i.test(f.name) && /h\.264|mpeg4/i.test(f.format ?? ""));
+    // Prefer the "h.264" derivative (browser-safe), then the smallest file above 20 MB (skips trailers and samples).
+    const rank = (f: { format?: string; size?: string }) => (/h\.264/i.test(f.format ?? "") ? 0 : 1) * 1e13 + Number(f.size ?? 0);
+    const video = mp4s.filter((f) => Number(f.size ?? 0) > 20e6 || !f.size).sort((a, b) => rank(a) - rank(b))[0] ?? mp4s[0];
+    const title = String(one(m.title) ?? "").trim();
+    if (!video?.name || !title) return undefined;
+    const runtime = String(one(m.runtime) ?? "");
+    const hms = runtime.match(/(?:(\d+):)?(\d+):(\d+)/);
+    const minutes = hms ? Number(hms[1] ?? 0) * 60 + Number(hms[2]) : /(\d+)\s*min/i.test(runtime) ? Number(runtime.match(/(\d+)\s*min/i)![1]) : undefined;
+    const year = Number(String(one(m.year) ?? one(m.date) ?? "").slice(0, 4));
+    const desc = String(one(m.description) ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+    return {
+      identifier, title: title.slice(0, 200), description: desc ? desc.slice(0, 1500) : undefined,
+      year: year > 1880 && year < 2100 ? year : undefined, runtimeMin: minutes && minutes < 600 ? minutes : undefined,
+      licenseUrl: license, videoUrl: `https://archive.org/download/${identifier}/${video.name.split("/").map(encodeURIComponent).join("/")}`,
+      posterUrl: `https://archive.org/services/img/${identifier}`, pageUrl: `https://archive.org/details/${identifier}`,
+    };
+  }
+}

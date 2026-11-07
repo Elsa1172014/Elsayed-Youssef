@@ -1,9 +1,10 @@
-import type { SportsDbClient, TmdbClient } from "./clients";
+import type { ArchiveClient, SportsDbClient, TmdbClient } from "./clients";
 import type { HubStore } from "./store";
 
 export interface HubClients {
   tmdb?: TmdbClient;
   sports: SportsDbClient;
+  archive: ArchiveClient;
   /** ISO region for "where to watch" (JustWatch via TMDB). */
   region: string;
 }
@@ -94,10 +95,57 @@ export async function syncSports(store: HubStore, c: HubClients, trigger: "cron"
   }
 }
 
+/**
+ * Open-licence film library: walks archive.org's most-viewed public-domain / Creative Commons films a page at a time
+ * (cursor in hub.settings) and adds up to `max` new films per run, each with its playable MP4 and licence.
+ */
+export async function syncArchive(store: HubStore, c: HubClients, trigger: "cron" | "manual" = "cron", max = 15) {
+  const run = await store.startJob("archive", trigger);
+  try {
+    let page = (await store.getSetting<number>("archive_page")) ?? 1;
+    let added = 0;
+    let checked = 0;
+    let skipped = 0;
+    for (let round = 0; round < 3 && added < max; round++) {
+      const docs = await c.archive.search(page);
+      if (!docs.length) { page = 1; break; } // walked the whole collection: start again (picks up newly uploaded films)
+      const known = await store.existingExternal("archive", docs.map((d) => d.identifier));
+      const fresh = docs.filter((d) => !known.has(d.identifier)).slice(0, max - added);
+      await inBatches(fresh, 5, async (d) => {
+        checked++;
+        try {
+          const film = await c.archive.film(d.identifier);
+          if (!film) { skipped++; return; }
+          const pd = /publicdomain/i.test(film.licenseUrl);
+          await store.upsertOpenTitle({
+            source: "archive", externalId: film.identifier, kind: "movie", title: film.title, overview: film.description, posterUrl: film.posterUrl,
+            releaseYear: film.year, runtimeMin: film.runtimeMin, licenseUrl: film.licenseUrl, sourcePage: film.pageUrl, genres: [pd ? "ملكية عامة" : "رخصة مفتوحة"],
+            play: { label: "الفيلم كاملًا", url: film.videoUrl, kind: "mp4", rightsHolder: pd ? "Public domain" : "Creative Commons", licenseRef: film.licenseUrl, createdBy: "archive-sync" },
+          });
+          added++;
+        } catch (e) {
+          skipped++;
+          await store.logError("archive", msg(e), { identifier: d.identifier }, "archive");
+        }
+      });
+      if (fresh.length < docs.length || added < max) page++; // this page is exhausted: move on
+    }
+    await store.setSetting("archive_page", page);
+    const stats = { added, checked, skipped, nextPage: page };
+    await store.finishJob(run, true, stats);
+    return { ok: true, ...stats };
+  } catch (e) {
+    await store.logError("archive", msg(e), {}, "archive");
+    await store.finishJob(run, false, {}, msg(e));
+    return { ok: false, error: msg(e) };
+  }
+}
+
 /** Daily cron entry point: both syncs, then log retention. Never throws. */
 export async function runHubCron(store: HubStore, c: HubClients) {
   const tmdb = await syncTmdb(store, c, "cron").catch((e) => ({ ok: false, error: msg(e) }));
   const sports = await syncSports(store, c, "cron").catch((e) => ({ ok: false, error: msg(e) }));
+  const archive = await syncArchive(store, c, "cron").catch((e) => ({ ok: false, error: msg(e) }));
   await store.pruneLogs().catch(() => undefined);
-  return { tmdb, sports };
+  return { tmdb, sports, archive };
 }

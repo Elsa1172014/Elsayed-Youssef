@@ -5,7 +5,8 @@ import type { Db } from "../src/db";
 import { hubFromEnv, runHubCron } from "../src/hub";
 import { alice, bob, makeApp } from "./helpers";
 
-const SQL = readFileSync(new URL("../hub/supabase_hub.sql", import.meta.url), "utf8");
+const SQL = ["supabase_hub.sql", "supabase_hub_app_role.sql", "supabase_hub_002_open_films.sql", "supabase_hub_002_role.sql"]
+  .map((f) => readFileSync(new URL(`../hub/${f}`, import.meta.url), "utf8")).join("\n");
 
 /** Fake TMDB + TheSportsDB (no network). Records request URLs/headers to check key handling. */
 function fakeApis(opts: { tmdbFails?: boolean } = {}) {
@@ -27,6 +28,17 @@ function fakeApis(opts: { tmdbFails?: boolean } = {}) {
       if (url.includes("/movie/44")) return json({ id: 44, title: "بحث", genres: [{ id: 28, name: "أكشن" }] });
       return json({}, 404);
     }
+    if (url.includes("archive.org/advancedsearch.php")) {
+      const page = new URL(url).searchParams.get("page");
+      return json({ response: { docs: page === "1" ? [
+        { identifier: "night_film_1960", licenseurl: "http://creativecommons.org/publicdomain/mark/1.0/" },
+        { identifier: "no_licence_film", licenseurl: "https://example.org/all-rights-reserved" },
+        { identifier: "lying_index", licenseurl: "https://creativecommons.org/licenses/by/4.0/" },
+      ] : [] } });
+    }
+    if (url.includes("archive.org/metadata/night_film_1960")) return json({ metadata: { title: "Night Film", description: "<p>A classic.</p>", year: "1960", runtime: "1:35:10", licenseurl: "http://creativecommons.org/publicdomain/mark/1.0/" }, files: [
+      { name: "trailer.mp4", format: "h.264", size: "5000000" }, { name: "Night Film.mp4", format: "h.264", size: "600000000" }, { name: "Night Film.ogv", format: "Ogg Video", size: "500000000" }] });
+    if (url.includes("archive.org/metadata/lying_index")) return json({ metadata: { title: "Index Lied", licenseurl: "" }, files: [{ name: "x.mp4", format: "h.264", size: "90000000" }] });
     if (url.includes("thesportsdb.com")) {
       if (url.includes("lookupleague.php")) {
         const id = new URL(url).searchParams.get("id");
@@ -43,7 +55,7 @@ function fakeApis(opts: { tmdbFails?: boolean } = {}) {
 
 async function hubDb(): Promise<Db> {
   const db = new PGlite();
-  await db.exec("CREATE ROLE anon; CREATE ROLE authenticated;"); // Supabase's API roles, so the real migration runs unchanged
+  await db.exec("CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE hub_app;"); // Supabase's API roles + the server role, so the real migrations run unchanged
   await db.exec(SQL);
   return db as unknown as Db;
 }
@@ -56,7 +68,7 @@ describe("Entertainment Hub", () => {
     const r = await db.query<{ relname: string; rls: boolean; anon: boolean }>(
       "SELECT c.relname, c.relrowsecurity AS rls, has_table_privilege('anon', c.oid, 'select') AS anon FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='hub' AND c.relkind='r' ORDER BY 1",
     );
-    expect(r.rows).toHaveLength(6);
+    expect(r.rows).toHaveLength(7);
     for (const t of r.rows) expect(t).toMatchObject({ rls: true, anon: false });
   });
 
@@ -74,20 +86,31 @@ describe("Entertainment Hub", () => {
     const r = await runHubCron(hub.store, hub.clients);
     expect(r.tmdb).toMatchObject({ ok: true, saved: 2, providers: 2 });
     expect(r.sports).toMatchObject({ ok: true, leagues: 4, freeKey: true });
+    expect(r.archive).toMatchObject({ ok: true, added: 1 }); // only the film whose own metadata carries an open licence
     // Bearer token in a header, never in the URL; free SportsDB key by default.
     expect(calls.filter((c) => c.url.includes("themoviedb")).every((c) => c.auth?.startsWith("Bearer ") && !c.url.includes("api_key"))).toBe(true);
     expect(calls.some((c) => c.url.includes("/json/123/"))).toBe(true);
 
     const { app } = await makeApp({}, { hub });
     const titles = (await app.inject({ url: "/v1/hub/titles", headers: bob })).json();
-    expect(titles.total).toBe(2);
-    expect(titles.items[0]).toMatchObject({ title: "فيلم أ", genres: ["أكشن"], voteAverage: 7.8, providers: { flatrate: [{ name: "Netflix" }] } });
+    expect(titles.total).toBe(3);
+    expect((await app.inject({ url: "/v1/hub/titles?source=tmdb", headers: bob })).json().items[0]).toMatchObject({ title: "فيلم أ", genres: ["أكشن"], voteAverage: 7.8, providers: { flatrate: [{ name: "Netflix" }] } });
     expect((await app.inject({ url: "/v1/hub/titles?kind=tv", headers: bob })).json().items[0].title).toBe("مسلسل ب");
     const upcoming = (await app.inject({ url: "/v1/hub/matches", headers: bob })).json();
     expect(upcoming[0]).toMatchObject({ homeTeam: "Home", awayTeam: "Away", eventTime: "2099-01-01T18:00:00.000Z" });
     expect((await app.inject({ url: "/v1/hub/matches?range=recent", headers: bob })).json()[0]).toMatchObject({ homeScore: 2, awayScore: 1 });
     expect(hub.store.jobs).toBeDefined();
-    expect((await hub.store.jobs()).map((j) => j.job).sort()).toEqual(["sports", "tmdb"]);
+    expect((await hub.store.jobs()).map((j) => j.job).sort()).toEqual(["archive", "sports", "tmdb"]);
+    const open = (await app.inject({ url: "/v1/hub/titles?source=archive", headers: bob })).json().items;
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ title: "Night Film", releaseYear: 1960, runtimeMin: 95, licenseUrl: "http://creativecommons.org/publicdomain/mark/1.0/", sourcePage: "https://archive.org/details/night_film_1960", posterUrl: "https://archive.org/services/img/night_film_1960", licensedCount: 1 });
+    const film = (await app.inject({ url: `/v1/hub/titles/${open[0].id}`, headers: bob })).json();
+    expect(film.sources[0]).toMatchObject({ kind: "mp4", url: "https://archive.org/download/night_film_1960/Night%20Film.mp4" });
+    expect(await hub.store.getSetting("archive_page")).toBe(1); // cursor reset after walking the whole (fake) collection
+    // A second run adds nothing new and does not duplicate the source.
+    await runHubCron(hub.store, hub.clients);
+    expect((await app.inject({ url: "/v1/hub/titles?source=archive", headers: bob })).json().total).toBe(1);
+    expect((await hub.store.sourcesFor(open[0].id, false))).toHaveLength(1);
   });
 
   it("records provider failures in the error log without exposing keys", async () => {
@@ -125,6 +148,16 @@ describe("Entertainment Hub", () => {
     expect((await app.inject({ url: `/v1/hub/admin/titles/${t.id}/sources`, headers: bob })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/v1/hub/admin/leagues", headers: alice, payload: { id: "4387" } })).json()).toMatchObject({ id: "4387", name: "League 4387" });
     expect((await app.inject({ method: "POST", url: "/v1/hub/admin/leagues", headers: alice, payload: { id: "x;drop" } })).statusCode).toBe(400);
+
+    // Own films: rights attestation + https required; admins only; shows up as "own" and is playable.
+    const own = (p: Record<string, unknown>, h = alice) => app.inject({ method: "POST", url: "/v1/hub/admin/own-titles", headers: h, payload: { title: "فيلمي", url: "https://media.example.org/my-film.mp4", rightsHolder: "السيد محمود", rightsAttested: true, ...p } });
+    expect((await own({}, bob)).statusCode).toBe(403);
+    expect((await own({ rightsAttested: false })).statusCode).toBe(400);
+    expect((await own({ url: "http://media.example.org/x.mp4" })).statusCode).toBe(400);
+    const mine = (await own({ year: 2024 })).json();
+    expect(mine).toMatchObject({ source: "own", title: "فيلمي", releaseYear: 2024, featured: true });
+    expect((await app.inject({ url: `/v1/hub/titles/${mine.id}`, headers: bob })).json().sources[0]).toMatchObject({ kind: "mp4", url: "https://media.example.org/my-film.mp4" });
+    expect((await app.inject({ method: "DELETE", url: `/v1/hub/admin/titles/${mine.id}`, headers: alice })).statusCode).toBe(204);
   });
 });
 

@@ -1,9 +1,16 @@
 import type { Db } from "../db";
 import type { SportsEvent, TmdbTitle, WatchProviders } from "./clients";
 
+export type TitleSource = "tmdb" | "archive" | "own";
 export interface TitleRow {
   id: number;
-  tmdbId: number;
+  source: TitleSource;
+  tmdbId?: number;
+  posterUrl?: string;
+  releaseYear?: number;
+  runtimeMin?: number;
+  licenseUrl?: string;
+  sourcePage?: string;
   kind: "movie" | "tv";
   title: string;
   originalTitle?: string;
@@ -70,14 +77,17 @@ export class HubStore {
   /** TMDB terms: cached metadata must not be kept longer than 6 months. Titles with licensed sources are refreshed, not purged. */
   async purgeStaleTitles(): Promise<number> {
     const r = await this.db.query<{ n: number }>(
-      "WITH d AS (DELETE FROM hub.titles t WHERE t.updated_at < now() - interval '180 days' AND NOT EXISTS (SELECT 1 FROM hub.licensed_sources s WHERE s.title_id = t.id) RETURNING 1) SELECT count(*)::int AS n FROM d",
+      "WITH d AS (DELETE FROM hub.titles t WHERE t.source = 'tmdb' AND t.updated_at < now() - interval '180 days' AND NOT EXISTS (SELECT 1 FROM hub.licensed_sources s WHERE s.title_id = t.id) RETURNING 1) SELECT count(*)::int AS n FROM d",
     );
     return Number(r.rows[0]?.n ?? 0);
   }
 
   private static title(r: Record<string, unknown>): TitleRow {
     return {
-      id: Number(r.id), tmdbId: Number(r.tmdb_id), kind: r.kind as "movie" | "tv", title: String(r.title), originalTitle: und(r.original_title as string | null),
+      id: Number(r.id), source: (r.source as TitleSource) ?? "tmdb", tmdbId: r.tmdb_id === null || r.tmdb_id === undefined ? undefined : Number(r.tmdb_id),
+      posterUrl: und(r.poster_url as string | null), releaseYear: r.release_year === null || r.release_year === undefined ? undefined : Number(r.release_year),
+      runtimeMin: r.runtime_min === null || r.runtime_min === undefined ? undefined : Number(r.runtime_min), licenseUrl: und(r.license_url as string | null), sourcePage: und(r.source_page as string | null),
+      kind: r.kind as "movie" | "tv", title: String(r.title), originalTitle: und(r.original_title as string | null),
       overview: und(r.overview as string | null), posterPath: und(r.poster_path as string | null), backdropPath: und(r.backdrop_path as string | null),
       releaseDate: day(r.release_date), voteAverage: r.vote_average === null ? undefined : Number(r.vote_average),
       genres: (typeof r.genres === "string" ? JSON.parse(r.genres) : r.genres) as string[], providers: (typeof r.providers === "string" ? JSON.parse(r.providers) : r.providers) as Partial<WatchProviders>,
@@ -86,10 +96,11 @@ export class HubStore {
     };
   }
 
-  async listTitles(f: { kind?: "movie" | "tv"; q?: string; licensedOnly?: boolean; limit?: number; offset?: number }): Promise<{ items: TitleRow[]; total: number }> {
+  async listTitles(f: { kind?: "movie" | "tv"; source?: TitleSource; q?: string; licensedOnly?: boolean; limit?: number; offset?: number }): Promise<{ items: TitleRow[]; total: number }> {
     const where: string[] = [];
     const vals: unknown[] = [];
     if (f.kind) { vals.push(f.kind); where.push(`t.kind = $${vals.length}`); }
+    if (f.source) { vals.push(f.source); where.push(`t.source = $${vals.length}`); }
     if (f.q) { vals.push(`%${f.q.replace(/[%_\\]/g, (m) => "\\" + m)}%`); where.push(`(t.title ILIKE $${vals.length} OR t.original_title ILIKE $${vals.length})`); }
     if (f.licensedOnly) where.push("EXISTS (SELECT 1 FROM hub.licensed_sources s WHERE s.title_id = t.id AND s.enabled AND (s.valid_until IS NULL OR s.valid_until >= current_date))");
     const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -111,6 +122,45 @@ export class HubStore {
 
   async setFeatured(id: number, featured: boolean) {
     await this.db.query("UPDATE hub.titles SET featured=$2 WHERE id=$1", [id, featured]);
+  }
+
+  /** A film that is not on TMDB (open-licence archive film or the operator's own), with its playable source, in one step. */
+  async upsertOpenTitle(t: {
+    source: "archive" | "own"; externalId: string; kind: "movie" | "tv"; title: string; overview?: string; posterUrl?: string; releaseYear?: number; runtimeMin?: number;
+    licenseUrl?: string; sourcePage?: string; genres?: string[]; play: { label: string; url: string; kind: "hls" | "dash" | "mp4"; rightsHolder: string; licenseRef: string; createdBy: string; drmSystem?: LicensedSource["drmSystem"]; licenseUrl?: string };
+  }): Promise<number> {
+    const r = await this.db.query<{ id: number }>(
+      `INSERT INTO hub.titles (source, external_id, kind, title, overview, poster_url, release_year, runtime_min, license_url, source_page, genres, featured, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12, now())
+       ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO UPDATE SET title=EXCLUDED.title, overview=EXCLUDED.overview, poster_url=EXCLUDED.poster_url,
+         release_year=EXCLUDED.release_year, runtime_min=EXCLUDED.runtime_min, license_url=EXCLUDED.license_url, source_page=EXCLUDED.source_page, updated_at=now()
+       RETURNING id`,
+      [t.source, t.externalId, t.kind, t.title, t.overview ?? null, t.posterUrl ?? null, t.releaseYear ?? null, t.runtimeMin ?? null, t.licenseUrl ?? null, t.sourcePage ?? null,
+        JSON.stringify(t.genres ?? []), t.source === "own"],
+    );
+    const id = Number(r.rows[0]!.id);
+    if (!(await this.sourcesFor(id, false)).some((s) => s.url === t.play.url)) await this.addSource({ titleId: id, ...t.play });
+    return id;
+  }
+
+  async existingExternal(source: TitleSource, ids: string[]): Promise<Set<string>> {
+    if (!ids.length) return new Set();
+    const r = await this.db.query<{ external_id: string }>("SELECT external_id FROM hub.titles WHERE source = $1 AND external_id = ANY($2::text[])", [source, ids]);
+    return new Set(r.rows.map((x) => x.external_id));
+  }
+
+  async getSetting<T>(key: string): Promise<T | undefined> {
+    const r = await this.db.query<{ value: unknown }>("SELECT value FROM hub.settings WHERE key = $1", [key]);
+    const v = r.rows[0]?.value;
+    return (typeof v === "string" ? JSON.parse(v) : v) as T | undefined;
+  }
+
+  async setSetting(key: string, value: unknown) {
+    await this.db.query("INSERT INTO hub.settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()", [key, JSON.stringify(value)]);
+  }
+
+  async deleteTitle(id: number): Promise<boolean> {
+    return (await this.db.query("DELETE FROM hub.titles WHERE id = $1 RETURNING id", [id])).rows.length > 0;
   }
 
   // ---------- licensed sources ----------
@@ -222,8 +272,8 @@ export class HubStore {
   }
 
   async counts() {
-    const r = await this.db.query<{ titles: number; licensed: number; leagues: number; events: number; errors24h: number }>(
-      `SELECT (SELECT count(*) FROM hub.titles)::int AS titles, (SELECT count(*) FROM hub.licensed_sources WHERE enabled)::int AS licensed,
+    const r = await this.db.query<{ titles: number; openFilms: number; licensed: number; leagues: number; events: number; errors24h: number }>(
+      `SELECT (SELECT count(*) FROM hub.titles)::int AS titles, (SELECT count(*) FROM hub.titles WHERE source = 'archive')::int AS "openFilms", (SELECT count(*) FROM hub.licensed_sources WHERE enabled)::int AS licensed,
               (SELECT count(*) FROM hub.sports_leagues WHERE enabled)::int AS leagues, (SELECT count(*) FROM hub.sports_events WHERE event_time >= now())::int AS events,
               (SELECT count(*) FROM hub.error_log WHERE at > now() - interval '24 hours')::int AS errors24h`,
     );

@@ -1,20 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type HubMatch, type HubPlaySource, type HubStatus, type HubTitle, type Source } from "./api";
+import { api, type Channel, type HubMatch, type HubPlaySource, type HubStatus, type HubTitle, type Source } from "./api";
+import { groupsOf } from "./groups";
+import { LEGAL_PLAYLISTS } from "./organize";
+import { Player } from "./Player";
 import { HubAdmin } from "./HubAdmin";
 import { HubPlayer } from "./HubPlayer";
 
-type Section = "library" | "matches" | "receiver" | "iptv" | "admin";
+type Section = "library" | "channels" | "matches" | "receiver" | "iptv" | "admin";
 const IMG = "https://image.tmdb.org/t/p/";
+const poster = (t: HubTitle, size = "w342") => t.posterUrl ?? (t.posterPath ? `${IMG}${size}${t.posterPath}` : undefined);
 const fmtTime = (iso?: string) => (iso ? new Intl.DateTimeFormat("ar", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—");
 
 /** Entertainment Hub: movies & series (TMDB metadata + licensed sources), matches (TheSportsDB), receiver library, IPTV-org, admin. */
-export function HubView({ onNavigate }: { onNavigate: (tab: "catalog" | "live" | "manage") => void }) {
+export function HubView({ onNavigate, channels, refresh }: { onNavigate: (tab: "catalog" | "live" | "manage") => void; channels: Channel[]; refresh: () => Promise<unknown> }) {
   const [status, setStatus] = useState<HubStatus | null>(null);
   const [section, setSection] = useState<Section>("library");
   const [err, setErr] = useState("");
   useEffect(() => { void api.hubStatus().then(setStatus).catch((e: Error) => setErr(e.message)); }, []);
 
-  const sections: [Section, string][] = [["library", "🎬 أفلام ومسلسلات"], ["matches", "⚽ المباريات"], ["receiver", "📡 مكتبة الرسيفر"], ["iptv", "🌍 قنوات IPTV-org"]];
+  const sections: [Section, string][] = [["library", "🎬 أفلام ومسلسلات"], ["channels", "📺 قنوات الأفلام"], ["matches", "⚽ المباريات"], ["receiver", "📡 مكتبة الرسيفر"], ["iptv", "🌍 قنوات IPTV-org"]];
   if (status?.isAdmin) sections.push(["admin", "🛠 لوحة الإدارة"]);
 
   return (
@@ -30,12 +34,13 @@ export function HubView({ onNavigate }: { onNavigate: (tab: "catalog" | "live" |
         <p className="hub-note">وحدة الترفيه غير مفعّلة على الخادم بعد: يلزم ضبط متغير البيئة <code>SUPABASE_DB_URL</code> في Vercel. قسما الرسيفر وIPTV-org يعملان الآن.</p>
       )}
       {section === "library" && status?.enabled && <Library />}
+      {section === "channels" && <MovieChannels channels={channels} refresh={refresh} />}
       {section === "matches" && status?.enabled && <Matches />}
       {section === "receiver" && <Receiver onNavigate={onNavigate} />}
       {section === "iptv" && <Iptv onNavigate={onNavigate} />}
       {section === "admin" && status?.isAdmin && <HubAdmin />}
       <footer className="hub-credits">
-        بيانات الأفلام والمسلسلات من TMDB — هذا المنتج يستخدم واجهة TMDB البرمجية لكنه غير معتمد من TMDB. بيانات «أين تشاهد» مقدَّمة من JustWatch. بيانات المباريات من TheSportsDB. القنوات المفتوحة من دليل iptv-org.
+        الأفلام الكلاسيكية المجانية من أرشيف الإنترنت (archive.org) بترخيص ملكية عامة أو Creative Commons. بيانات الأفلام والمسلسلات من TMDB — هذا المنتج يستخدم واجهة TMDB البرمجية لكنه غير معتمد من TMDB. بيانات «أين تشاهد» مقدَّمة من JustWatch. بيانات المباريات من TheSportsDB. القنوات المفتوحة من دليل iptv-org.
       </footer>
     </div>
   );
@@ -43,6 +48,7 @@ export function HubView({ onNavigate }: { onNavigate: (tab: "catalog" | "live" |
 
 function Library() {
   const [kind, setKind] = useState<"" | "movie" | "tv">("");
+  const [source, setSource] = useState<"" | "archive" | "own" | "tmdb">("");
   const [q, setQ] = useState("");
   const [licensed, setLicensed] = useState(false);
   const [items, setItems] = useState<HubTitle[]>([]);
@@ -51,10 +57,10 @@ function Library() {
   const [playing, setPlaying] = useState<HubPlaySource | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
-    const h = setTimeout(() => void api.hubTitles({ kind: kind || undefined, q: q.trim() || undefined, licensed }).then((r) => { setItems(r.items); setTotal(r.total); setErr(""); }).catch((e: Error) => setErr(e.message)), 250);
+    const h = setTimeout(() => void api.hubTitles({ kind: kind || undefined, source: source || undefined, q: q.trim() || undefined, licensed }).then((r) => { setItems(r.items); setTotal(r.total); setErr(""); }).catch((e: Error) => setErr(e.message)), 250);
     return () => clearTimeout(h);
-  }, [kind, q, licensed]);
-  const more = () => void api.hubTitles({ kind: kind || undefined, q: q.trim() || undefined, licensed, offset: items.length }).then((r) => setItems([...items, ...r.items])).catch(() => undefined);
+  }, [kind, source, q, licensed]);
+  const more = () => void api.hubTitles({ kind: kind || undefined, source: source || undefined, q: q.trim() || undefined, licensed, offset: items.length }).then((r) => setItems([...items, ...r.items])).catch(() => undefined);
 
   return (
     <section>
@@ -63,14 +69,19 @@ function Library() {
         {([["", "الكل"], ["movie", "أفلام"], ["tv", "مسلسلات"]] as const).map(([k, l]) => <button key={k} aria-pressed={kind === k} onClick={() => setKind(k)}>{l}</button>)}
         <button aria-pressed={licensed} onClick={() => setLicensed((x) => !x)}>▶ متاح للمشاهدة هنا</button>
       </div>
+      <div className="groups">
+        {([["", "كل المصادر"], ["archive", "🎞 أفلام كلاسيكية مجانية"], ["own", "⭐ أفلامي"], ["tmdb", "🔥 الأكثر رواجًا (TMDB)"]] as const).map(([k, l]) => (
+          <button key={k} aria-pressed={source === k} aria-selected={source === k} onClick={() => setSource(k)}>{l}</button>
+        ))}
+      </div>
       {err && <p className="error">{err}</p>}
       {!err && items.length === 0 && <p className="hint">المكتبة فارغة. تُحدَّث تلقائيًا كل يوم، أو يشغّل المشرف التحديث من لوحة الإدارة.</p>}
       <div className="hub-grid">
         {items.map((t) => (
           <button key={t.id} className="hub-card" onClick={() => void api.hubTitle(t.id).then(setOpen).catch((e: Error) => setErr(e.message))}>
-            {t.posterPath ? <img src={`${IMG}w342${t.posterPath}`} alt="" loading="lazy" /> : <div className="hub-noposter">🎬</div>}
+            {poster(t) ? <img src={poster(t)} alt="" loading="lazy" /> : <div className="hub-noposter">🎬</div>}
             <strong>{t.title}</strong>
-            <small>{t.kind === "movie" ? "فيلم" : "مسلسل"}{t.releaseDate ? ` · ${t.releaseDate.slice(0, 4)}` : ""}{t.voteAverage ? ` · ★ ${t.voteAverage}` : ""}</small>
+            <small>{t.kind === "movie" ? "فيلم" : "مسلسل"}{t.releaseDate ? ` · ${t.releaseDate.slice(0, 4)}` : t.releaseYear ? ` · ${t.releaseYear}` : ""}{t.voteAverage ? ` · ★ ${t.voteAverage}` : ""}</small>
             {t.licensedCount > 0 && <span className="hub-badge">▶ متاح</span>}
           </button>
         ))}
@@ -80,9 +91,9 @@ function Library() {
         <div className="hub-modal" role="dialog" aria-label={open.title} onClick={(e) => e.target === e.currentTarget && (setOpen(null), setPlaying(null))}>
           <div className="hub-detail">
             <button className="hub-close" onClick={() => { setOpen(null); setPlaying(null); }} aria-label="إغلاق">✕</button>
-            {playing ? <HubPlayer source={playing} onClose={() => setPlaying(null)} /> : open.backdropPath && <img className="hub-backdrop" src={`${IMG}w780${open.backdropPath}`} alt="" />}
+            {playing ? <HubPlayer source={playing} onClose={() => setPlaying(null)} /> : open.backdropPath ? <img className="hub-backdrop" src={`${IMG}w780${open.backdropPath}`} alt="" /> : open.posterUrl && <img className="hub-backdrop contain" src={open.posterUrl} alt="" />}
             <h3>{open.title} {open.originalTitle && open.originalTitle !== open.title && <small>({open.originalTitle})</small>}</h3>
-            <p className="hint">{[open.kind === "movie" ? "فيلم" : "مسلسل", open.releaseDate, open.voteAverage && `★ ${open.voteAverage}`, ...open.genres].filter(Boolean).join(" · ")}</p>
+            <p className="hint">{[open.kind === "movie" ? "فيلم" : "مسلسل", open.releaseDate ?? open.releaseYear, open.runtimeMin && `${open.runtimeMin} دقيقة`, open.voteAverage && `★ ${open.voteAverage}`, ...open.genres].filter(Boolean).join(" · ")}</p>
             {open.overview && <p>{open.overview}</p>}
             {open.sources.length > 0 && (
               <div className="hub-block">
@@ -90,7 +101,9 @@ function Library() {
                 <div className="ctools-row">{open.sources.map((s) => <button key={s.id} className="primary" onClick={() => setPlaying(s)}>▶ {s.label}{s.drmSystem ? " 🔒" : ""}</button>)}</div>
               </div>
             )}
-            <WhereToWatch t={open} />
+            {open.source === "tmdb" ? <WhereToWatch t={open} /> : open.source === "archive" && (
+              <p className="hint">المصدر: <a href={open.sourcePage} target="_blank" rel="noopener noreferrer">أرشيف الإنترنت</a> · الرخصة: <a href={open.licenseUrl} target="_blank" rel="noopener noreferrer">{/publicdomain/i.test(open.licenseUrl ?? "") ? "ملكية عامة" : "Creative Commons"}</a></p>
+            )}
           </div>
         </div>
       )}
@@ -227,6 +240,65 @@ function Iptv({ onNavigate }: { onNavigate: (tab: "catalog" | "live") => void })
         <button onClick={() => onNavigate("live")}>البث المباشر</button>
       </div>
       <p className="hint">التشغيل بمحرك Shaka Player أو hls.js تلقائيًا، ويمكن اختيار المحرك من زر ⚙ في المشغّل.</p>
+    </section>
+  );
+}
+
+function MovieChannels({ channels, refresh }: { channels: Channel[]; refresh: () => Promise<unknown> }) {
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState<"all" | "movies" | "series">("all");
+  const [sel, setSel] = useState<Channel | null>(null);
+  const [nonce, setNonce] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const list = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return channels.filter((c) => {
+      if (c.hidden) return false;
+      const g = groupsOf(c);
+      const inKind = kind === "all" ? g.includes("movies") || g.includes("series") : g.includes(kind);
+      return inKind && (!needle || c.name.toLowerCase().includes(needle));
+    });
+  }, [channels, q, kind]);
+  const addFree = async () => {
+    setBusy(true); setMsg("");
+    try {
+      let added = 0;
+      for (const [category, name] of [["movies", "iptv-org · أفلام"], ["series", "iptv-org · مسلسلات"]] as const) added += (await api.importCatalog({ category }, name, 5000)).added;
+      const have = await api.sources();
+      for (const p of LEGAL_PLAYLISTS) {
+        if (have.some((x) => x.url === p.url)) continue;
+        const src = await api.addSource({ name: p.name, type: "m3u_url", url: p.url });
+        added += (await api.syncSource(src.id).catch(() => ({ added: 0 }))).added ?? 0;
+      }
+      setMsg(`أُضيفت ${added.toLocaleString("ar")} قناة جديدة.`);
+      await refresh();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="hub-channels">
+      {sel && (
+        <div className="hub-block">
+          <Player key={`${sel.id}:${nonce}`} channelId={sel.id} onWatched={(sec) => void api.watch(sel.id, sec).catch(() => undefined)} />
+          <div className="hub-player-bar"><b>{sel.name}</b><span><button onClick={() => setNonce((n) => n + 1)}>⟳</button> <button onClick={() => setSel(null)}>✕ إغلاق</button></span></div>
+        </div>
+      )}
+      <div className="filters">
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث عن قناة أفلام" aria-label="بحث في قنوات الأفلام" />
+        {([["all", "أفلام ومسلسلات"], ["movies", "أفلام"], ["series", "مسلسلات"]] as const).map(([k, l]) => <button key={k} aria-pressed={kind === k} onClick={() => setKind(k)}>{l}</button>)}
+        <button className="primary" disabled={busy} onClick={() => void addFree()}>{busy ? "جارٍ الإضافة…" : "＋ إضافة قنوات الأفلام المجانية الرسمية"}</button>
+      </div>
+      {msg && <p className="hint" role="status">{msg}</p>}
+      {list.length === 0 ? <p className="hint">لا توجد قنوات أفلام بعد. اضغط «إضافة قنوات الأفلام المجانية الرسمية» لإضافة قنوات مثل Pluto TV وSamsung TV Plus المتاحة مجانًا.</p> : (
+        <ul className="hub-chlist">
+          {list.slice(0, 300).map((c) => (
+            <li key={c.id}><button className={sel?.id === c.id ? "active" : ""} onClick={() => { setSel(c); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+              {c.logoUrl ? <img src={c.logoUrl} alt="" loading="lazy" /> : <span className="ph">📺</span>}<span>{c.name}</span><small>{c.group ?? ""}</small>
+            </button></li>
+          ))}
+        </ul>
+      )}
+      {list.length > 300 && <p className="hint">يُعرض أول 300 قناة؛ استخدم البحث للوصول إلى البقية ({list.length.toLocaleString("ar")}).</p>}
     </section>
   );
 }
