@@ -32,7 +32,16 @@ for (const name of ["index", "cron"]) {
   writeFileSync(`${dir}/package.json`, '{"type":"module"}');
 }
 
-const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * blob:; connect-src *; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+// YouTube search (apps/web/api): uses Vercel's Node helpers (req.query, res.status().json()).
+{
+  const dir = `${out}/functions/api/youtube-search.func`;
+  mkdirSync(dir, { recursive: true });
+  await build({ entryPoints: ["../../apps/web/api/youtube-search.ts"], outfile: `${dir}/index.mjs`, bundle: true, platform: "node", target: "node22", format: "esm", legalComments: "none", logLevel: "warning" });
+  writeFileSync(`${dir}/.vc-config.json`, JSON.stringify({ runtime: "nodejs22.x", handler: "index.mjs", launcherType: "Nodejs", shouldAddHelpers: true, maxDuration: 15 }, null, 2));
+  writeFileSync(`${dir}/package.json`, '{"type":"module"}');
+}
+
+const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * blob:; connect-src *; worker-src 'self' blob:; frame-src https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 writeFileSync(
   `${out}/config.json`,
   JSON.stringify(
