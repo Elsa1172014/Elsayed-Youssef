@@ -1,5 +1,5 @@
 import Hls from "hls.js";
-import { causeFromHttp, repairAndPlay, type Cause, type Capabilities, type DrmSystem, type PlayRequest, type PlayResult, type RepairDeps } from "./core";
+import { causeFromHttp, repairAndPlay, type Cause, type Capabilities, type DrmSystem, type Engine, type PlayRequest, type PlayResult, type RepairDeps } from "./core";
 import { api, type Channel } from "./api";
 
 /** Browser side of "Repair & Play": real device checks and a player that only reports success once media is actually flowing. */
@@ -36,6 +36,7 @@ export async function deviceCapabilities(): Promise<Capabilities> {
   return {
     hls: mse && native ? "both" : mse ? "mse" : native ? "native" : "none",
     dash: hasMse,
+    shaka: hasMse || typeof (window as { ManagedMediaSource?: unknown }).ManagedMediaSource !== "undefined",
     drm: await detectDrm(),
     codec(c) {
       if (SUBTITLE.test(c)) return true; // text tracks are not part of the decode path
@@ -98,10 +99,62 @@ export async function startEngine(video: HTMLVideoElement, req: PlayRequest, hoo
     player.initialize(video, req.url, true);
     return { destroy: () => player.destroy() };
   }
+  if (req.engine === "shaka") {
+    // Shaka Player (Google, Apache-2.0): HLS + DASH, ABR, embedded subtitles, and licensed DRM through the browser's CDM.
+    const mod = (await import("shaka-player/dist/shaka-player.compiled.js")) as unknown as { default?: ShakaNs } & ShakaNs;
+    const shaka = mod.default ?? mod;
+    shaka.polyfill.installAll();
+    if (!shaka.Player.isBrowserSupported()) {
+      hooks.onFatal({ ok: false, cause: "player_error", detail: "Shaka Player is not supported on this browser" });
+      return { destroy: () => undefined };
+    }
+    const player = new shaka.Player();
+    await player.attach(video);
+    const retry = { maxAttempts: 2, baseDelay: 800, backoffFactor: 2, timeout: 15_000 };
+    player.configure({ streaming: { retryParameters: retry, bufferingGoal: 20, rebufferingGoal: 2 }, manifest: { retryParameters: retry } });
+    if (req.license) player.configure({ drm: { servers: { [KEY_SYSTEMS[req.license.system]]: req.license.url } } });
+    let failed = false;
+    const fatal = (err?: ShakaError) => {
+      if (failed || !err || err.severity !== 2) return; // 2 = CRITICAL; recoverable errors are retried by Shaka itself
+      failed = true;
+      hooks.onFatal(shakaCause(err));
+    };
+    player.addEventListener("error", (e) => fatal((e as unknown as { detail?: ShakaError }).detail));
+    try {
+      await player.load(req.url);
+    } catch (e) {
+      const err = e as ShakaError;
+      if (err?.code !== 7000) fatal({ ...err, severity: 2 }); // 7000 = load interrupted (channel changed)
+    }
+    return { destroy: () => void player.destroy(), nudge: () => player.retryStreaming() };
+  }
   // native: Safari/TV HLS, progressive MP4/TS/WebM
   video.onerror = () => hooks.onFatal({ ok: false, cause: mediaErrorCause(video.error?.code), detail: video.error?.message?.slice(0, 160) });
   video.src = req.url;
   return { destroy: () => { video.onerror = null; video.removeAttribute("src"); video.load(); } };
+}
+interface ShakaError { code?: number; category?: number; severity?: number; data?: unknown[] }
+interface ShakaPlayer {
+  attach(v: HTMLVideoElement): Promise<void>;
+  configure(cfg: Record<string, unknown>): boolean;
+  load(url: string): Promise<void>;
+  destroy(): Promise<void>;
+  retryStreaming(): boolean;
+  addEventListener(type: string, cb: (e: Event) => void): void;
+}
+interface ShakaNs {
+  polyfill: { installAll(): void };
+  Player: { new (): ShakaPlayer; isBrowserSupported(): boolean };
+}
+/** Shaka error categories: 1 network, 3 media, 4 manifest, 6 DRM. */
+function shakaCause(e: ShakaError): PlayResult {
+  const detail = `Shaka ${e.code ?? "?"}`;
+  if (e.code === 1001 && typeof e.data?.[1] === "number") return { ok: false, cause: causeFromHttp(e.data[1] as number), detail: `HTTP ${e.data[1]}` };
+  if (e.category === 1) return { ok: false, cause: e.code === 1003 ? "timeout" : "network", detail };
+  if (e.category === 6) return { ok: false, cause: "drm_protected", detail };
+  if (e.category === 3) return { ok: false, cause: "codec_unsupported", detail };
+  if (e.category === 4) return { ok: false, cause: "not_media", detail };
+  return { ok: false, cause: "player_error", detail };
 }
 interface DashPlayer {
   on(ev: string, cb: (e: never) => void): void;
@@ -164,7 +217,7 @@ export interface CachedSource {
   url: string;
   proxy: string;
   mode: "direct" | "relay";
-  engine: "hlsjs" | "native" | "dashjs";
+  engine: Engine;
   kind: PlayRequest["kind"];
   origin: string;
   at: number;

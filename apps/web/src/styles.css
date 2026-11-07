@@ -98,3 +98,5 @@ html.tv-mode{font-size:21px}html.tv-mode header{padding:18px 26px;gap:14px}html.
 .player .subnote{position:absolute;top:8px;inset-inline-start:8px;margin:0;z-index:4;background:#0a233bee;color:#fff;padding:6px 10px;border-radius:8px;font-size:.85rem;max-width:70%}
 .player .fs .subbtn{font-weight:700;font-family:Tahoma,sans-serif}.player .fs .subbtn.on{background:#1774c5;border-color:#3abfff}
 html.tv-mode .player .subs p{font-size:2rem}
+.player .engines{position:absolute;top:48px;inset-inline-end:8px;z-index:6;display:grid;gap:4px;background:#0a1d33f2;border:1px solid #2b577a;border-radius:12px;padding:10px;min-width:200px;color:#fff}
+.player .engines button{text-align:start;padding:7px 10px}.player .engines button.on{border-color:#3abfff;background:#14467a}.player .engines small{color:var(--sr-muted)}

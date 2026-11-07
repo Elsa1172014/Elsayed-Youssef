@@ -54,6 +54,13 @@ describe("repairAndPlay", () => {
     expect(calls.length).toBe(8);
   });
 
+  it("tries Shaka Player last when the device has it and the other engines fail", async () => {
+    const { final, calls } = await run({ capabilities: () => caps({ shaka: true }), plays: (r) => (r.engine === "shaka" ? { ok: true } : { ok: false, cause: "player_error" }), retry: { attempts: 1, baseDelayMs: 1, maxDelayMs: 1 } });
+    expect(final.source?.engine).toBe("shaka");
+    const engines = calls.map((c) => c.engine);
+    expect(engines.indexOf("shaka")).toBeGreaterThan(engines.indexOf("native"));
+  });
+
   it("uses the relay only for http origins on an https page", async () => {
     const { calls } = await run({ diagnose: async () => diag({ url: "http://o.example/a.m3u8" }) });
     expect(calls[0]!.mode).toBe("relay");

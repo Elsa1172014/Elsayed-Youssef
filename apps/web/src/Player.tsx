@@ -30,6 +30,11 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
   const [via, setVia] = useState<"" | "direct" | "relay">("");
   const [tap, setTap] = useState(false);
   const [repaired, setRepaired] = useState(false);
+  // Playback engine: "auto" (hls.js / dash.js / native, then Shaka as fallback) or one engine forced by the viewer.
+  const [engineChoice, setEngineChoice] = useState<"auto" | Engine>(() => { try { return (localStorage.getItem("receiver.engine") as Engine | null) ?? "auto"; } catch { return "auto"; } });
+  const [engineUsed, setEngineUsed] = useState<Engine | "">("");
+  const [showEngines, setShowEngines] = useState(false);
+  const chooseEngine = (e: "auto" | Engine) => { setEngineChoice(e); setShowEngines(false); try { localStorage.setItem("receiver.engine", e === "auto" ? "" : e); if (e === "auto") localStorage.removeItem("receiver.engine"); } catch { /* ignore */ } };
   // Arabic subtitles: remembered on this device, so they follow the viewer from channel to channel.
   const [subsOn, setSubsOn] = useState(() => { try { return localStorage.getItem("receiver.subs") === "1"; } catch { return false; } });
   const [subLines, setSubLines] = useState<string[]>([]);
@@ -95,6 +100,7 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
       const h = await startEngine(video, { url, mode, engine: eng, kind }, { onFatal: () => !cancelled && onFatal() });
       if (cancelled) return h.destroy();
       handle = h;
+      setEngineUsed(eng);
       void tryAutoplay();
     };
 
@@ -106,7 +112,14 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
         const alt = pref && pref.origin !== "current" ? pref : undefined;
         const src = alt ? { url: alt.url, proxy: alt.proxy } : { url, proxy };
         const kind = pref?.kind ?? detectStreamKind(src.url);
-        const engine = pref?.engine ?? defaultEngine(kind);
+        const forced = engineChoice !== "auto" ? engineChoice : undefined;
+        const engine = forced ?? pref?.engine ?? defaultEngine(kind);
+        // When the automatic engine fails on a direct link, give Shaka one try before falling back to the server relay.
+        const shakaFirst = (next: () => void) => () => {
+          if (cancelled) return;
+          if (forced || engine === "shaka" || !(kind === "hls" || kind === "dash" || kind === "unknown")) return next();
+          void start(src.url, "direct", "shaka", kind, next).catch(next);
+        };
         setRepaired(!!pref);
         const insecurePage = location.protocol === "https:" && src.url.startsWith("http:");
         const viaRelay = () => {
@@ -120,7 +133,8 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
         };
         if (insecurePage || pref?.mode === "relay") return viaRelay(); // browsers block http media on https pages
         setVia("direct");
-        void start(src.url, "direct", engine, kind, viaRelay).catch(viaRelay); // direct failed (usually CORS): retry through the relay once
+        const fallback = shakaFirst(viaRelay);
+        void start(src.url, "direct", engine, kind, fallback).catch(fallback); // direct failed: Shaka, then the relay once
       })
       .catch((e: Error) => setError(e.message));
     return () => {
@@ -133,7 +147,7 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
       if (seconds >= 10) onWatched(seconds);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channelId]);
+  }, [channelId, engineChoice]);
 
   const fullscreen = () => {
     const el = box.current as (HTMLDivElement & { webkitRequestFullscreen?: () => void }) | null;
@@ -159,10 +173,20 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
   return (
     <div className={theater ? "player theater" : "player"} ref={box}>
       <video ref={ref} controls autoPlay playsInline onDoubleClick={fullscreen} />
+      {showEngines && (
+        <div className="engines" role="menu" dir="rtl">
+          <strong>محرك التشغيل</strong>
+          {([["auto", "تلقائي (موصى به)"], ["shaka", "Shaka Player"], ["hlsjs", "hls.js"], ["dashjs", "dash.js"], ["native", "مشغّل المتصفح"]] as const).map(([k, label]) => (
+            <button key={k} type="button" role="menuitemradio" aria-checked={engineChoice === k} className={engineChoice === k ? "on" : ""} onClick={() => chooseEngine(k)}>{engineChoice === k ? "● " : "○ "}{label}</button>
+          ))}
+          {engineUsed && <small>يعمل الآن: {engineUsed === "shaka" ? "Shaka Player" : engineUsed === "hlsjs" ? "hls.js" : engineUsed === "dashjs" ? "dash.js" : "مشغّل المتصفح"}</small>}
+        </div>
+      )}
       {subsOn && subLines.length > 0 && <div className="subs" dir="rtl" lang="ar" aria-live="polite">{subLines.map((l, i) => <p key={i}>{l}</p>)}</div>}
       {subsOn && subNote && <p className="subnote" dir="rtl">{subNote}</p>}
       {tap && <button type="button" className="bigplay" onClick={() => { setTap(false); void ref.current?.play(); }}>▶ {playLabel}</button>}
       <div className="fs">
+        <button type="button" className={engineChoice !== "auto" ? "subbtn on" : "subbtn"} onClick={() => setShowEngines((x) => !x)} aria-expanded={showEngines} title="محرك التشغيل" aria-label="محرك التشغيل">⚙</button>
         <button type="button" className={subsOn ? "subbtn on" : "subbtn"} aria-pressed={subsOn} onClick={() => setSubsOn((x) => !x)} title="ترجمة عربية" aria-label="ترجمة عربية">ع</button>
         {pipOk && <button type="button" onClick={pip} aria-label="Picture in picture" title="Picture in picture">⧉</button>}
         <button type="button" onClick={() => setTheater((t) => !t)} aria-label="Wide view" title="Wide view">▭</button>

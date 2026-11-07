@@ -48,9 +48,11 @@ export interface Capabilities {
   codec(codec: string): boolean;
   /** Key systems the device exposes for encrypted playback. */
   drm: DrmSystem[];
+  /** Shaka Player (HLS + DASH over MediaSource) is available as an extra fallback engine. */
+  shaka?: boolean;
 }
 
-export type Engine = "hlsjs" | "native" | "dashjs";
+export type Engine = "hlsjs" | "native" | "dashjs" | "shaka";
 export type Mode = "direct" | "relay";
 
 export interface PlayRequest {
@@ -125,8 +127,9 @@ const fresh = (): PanelState => ({
 });
 
 const enginesFor = (kind: StreamKind, caps: Capabilities): Engine[] => {
-  if (kind === "dash") return caps.dash ? ["dashjs"] : [];
-  if (kind === "hls" || kind === "unknown") return [...(caps.hls === "mse" || caps.hls === "both" ? (["hlsjs"] as Engine[]) : []), ...(caps.hls === "native" || caps.hls === "both" ? (["native"] as Engine[]) : [])];
+  const shaka: Engine[] = caps.shaka ? ["shaka"] : [];
+  if (kind === "dash") return [...(caps.dash ? (["dashjs"] as Engine[]) : []), ...shaka];
+  if (kind === "hls" || kind === "unknown") return [...(caps.hls === "mse" || caps.hls === "both" ? (["hlsjs"] as Engine[]) : []), ...(caps.hls === "native" || caps.hls === "both" ? (["native"] as Engine[]) : []), ...shaka];
   return ["native"];
 };
 
