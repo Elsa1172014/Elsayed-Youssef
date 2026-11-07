@@ -19,10 +19,22 @@ export { HubStore } from "./store";
 export async function hubFromEnv(env: Record<string, string | undefined> = process.env, opts: { db?: Db; fetch?: Fetch } = {}): Promise<Hub | undefined> {
   let db = opts.db;
   if (!db) {
-    const url = env.SUPABASE_DB_URL;
-    if (!url) return undefined;
+    // One URL, or several candidates separated by spaces (e.g. both regional pooler hosts): the first that answers wins.
+    const urls = (env.SUPABASE_DB_URL ?? "").split(/\s+/).filter((u) => /^postgres(ql)?:\/\//.test(u));
+    if (!urls.length) return undefined;
     const { default: pg } = await import("pg");
-    db = new pg.Pool({ connectionString: url, max: Number(env.HUB_POOL_MAX ?? 2), connectionTimeoutMillis: 10_000, idleTimeoutMillis: 10_000, ssl: /sslmode=disable/.test(url) ? undefined : { rejectUnauthorized: false } }) as unknown as Db;
+    for (const url of urls) {
+      const pool = new pg.Pool({ connectionString: url, max: Number(env.HUB_POOL_MAX ?? 2), connectionTimeoutMillis: 8_000, idleTimeoutMillis: 10_000, ssl: /sslmode=disable/.test(url) ? undefined : { rejectUnauthorized: false } });
+      try {
+        await pool.query("SELECT 1 FROM hub.job_runs LIMIT 1");
+        db = pool as unknown as Db;
+        break;
+      } catch (e) {
+        console.error("hub db candidate failed:", (e as Error).message.replace(/postgres(ql)?:\/\/\S+/gi, "[url]").slice(0, 160));
+        await pool.end().catch(() => undefined);
+      }
+    }
+    if (!db) throw new Error("No SUPABASE_DB_URL candidate could connect");
   }
   const tmdbKey = env.TMDB_READ_TOKEN || env.TMDB_API_KEY;
   const sportsKey = env.THESPORTSDB_KEY || "123";

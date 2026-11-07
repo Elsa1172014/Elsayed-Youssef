@@ -15,7 +15,7 @@ Additive module: the rest of the platform behaves exactly as before when the Hub
 ## Data (Supabase, schema `hub`)
 `services/api/hub/supabase_hub.sql` — applied to the Supabase project as migration `smart_receiver_entertainment_hub_schema`.
 RLS is enabled on every table with no policies, and `anon`/`authenticated` have no privileges: the public Data API cannot read or write.
-Only the platform server connects, with `SUPABASE_DB_URL`.
+Only the platform server connects, as the least-privilege role `hub_app` (see `supabase_hub_app_role.sql`), with `SUPABASE_DB_URL`. Several candidate URLs may be given separated by spaces; the first that connects is used.
 
 ## Server env vars (Vercel → Settings → Environment Variables; never in the repo)
 | Variable | Required | Purpose |
