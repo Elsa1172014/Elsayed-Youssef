@@ -89,3 +89,5 @@ html.tv-mode{font-size:21px}html.tv-mode header{padding:18px 26px;gap:14px}html.
 .chnum{min-width:2.2em;text-align:center;font-size:.8rem;color:var(--sr-muted);font-variant-numeric:tabular-nums}
 .main{position:sticky}.numosd{position:absolute;top:22px;inset-inline-start:24px;z-index:6;font-size:2.4rem;font-weight:700;background:#000b;color:#fff;padding:6px 16px;border-radius:12px;font-variant-numeric:tabular-nums}
 @media(max-width:900px){.ctools-keys{display:none}}
+.subgroups{padding-top:6px;border-top:1px dashed #ffffff18}.subgroups button{font-size:.85rem;padding:3px 9px}
+.bulkbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0 10px;font-size:.9rem}.bulkbar label{display:flex;gap:6px;align-items:center}.bulkbar .primary{background:linear-gradient(120deg,#126db8,#249fe5);font-weight:600}

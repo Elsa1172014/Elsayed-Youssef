@@ -10,6 +10,7 @@ import { SignIn } from "./SignIn";
 import { YouTubeView } from "./YouTubeView";
 import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
 import { ChannelTools } from "./ChannelTools";
+import { LEGAL_PLAYLISTS, collapseDuplicates, exactDuplicates, subGroupOf } from "./organize";
 import { alternativesFor, clearRecent, loadFavs, loadRecent, pushRecent, saveFavs } from "./tools";
 
 type Tab = "live" | "youtube" | "news" | "guide" | "catalog" | "premium" | "manage";
@@ -34,6 +35,9 @@ export function App() {
   const [recent, setRecent] = useState<string[]>(loadRecent);
   const [failed, setFailed] = useState(false);
   const [numBuf, setNumBuf] = useState("");
+  const [sub, setSub] = useState(""); // group inside the chosen activity
+  const [dedupe, setDedupe] = useState(() => { try { return localStorage.getItem("receiver.dedupe") !== "0"; } catch { return true; } });
+  const [bulkBusy, setBulkBusy] = useState("");
   const playChannel = useCallback((c: Channel) => { setSelected(c); setFailed(false); setPlayNonce((n) => n + 1); }, []);
   const toggleFav = useCallback((id: string) => setFavs((f) => { const n = f.includes(id) ? f.filter((x) => x !== id) : [id, ...f]; saveFavs(n); return n; }), []);
   const [query, setQuery] = useState("");
@@ -153,13 +157,57 @@ export function App() {
     }
     setHealthBusy(false);
   };
+  const okIds = useMemo(() => new Set(Object.entries(health).filter(([, v]) => v.status === "تعمل").map(([k]) => k)), [health]);
+  const regionName = useMemo(() => {
+    let dn: Intl.DisplayNames | undefined;
+    try { dn = new Intl.DisplayNames([lang], { type: "region" }); } catch { /* old browser */ }
+    return (code: string) => { try { return dn?.of(code.toUpperCase()) ?? code; } catch { return code; } };
+  }, [lang]);
   const inGroup = (c: Channel, g: string) => (g === "all" ? true : g === "fav" ? favs.includes(c.id) : g === "recent" ? recent.includes(c.id) : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
     const ordered = group === "recent" ? recent.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c) : group === "fav" ? favs.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c) : list;
-    return ordered.filter((c) => inGroup(c, group) && (!country || c.country === country));
-  }, [channels, hits, group, country, favs, recent]);
+    const inActivity = ordered.filter((c) => inGroup(c, group) && (!country || c.country === country));
+    const inSub = sub ? inActivity.filter((c) => subGroupOf(c, regionName) === sub) : inActivity;
+    return dedupe && group !== "fav" && group !== "recent" ? collapseDuplicates(inSub, okIds).shown : inSub;
+  }, [channels, hits, group, country, favs, recent, sub, dedupe, okIds, regionName]);
+  const hiddenDupes = useMemo(() => {
+    if (!dedupe || hits) return 0;
+    const list = channels.filter((c) => !c.hidden && inGroup(c, group) && (!country || c.country === country) && (!sub || subGroupOf(c, regionName) === sub));
+    return collapseDuplicates(list, okIds).hidden;
+  }, [channels, dedupe, hits, group, country, sub, okIds, regionName]);
+  // Groups inside the chosen activity (playlist group-title, else country), biggest first.
+  const subGroups = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const c of channels) if (!c.hidden && inGroup(c, group) && (!country || c.country === country)) { const g = subGroupOf(c, regionName); n.set(g, (n.get(g) ?? 0) + 1); }
+    return [...n].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [channels, group, country, regionName]);
+  const exact = useMemo(() => exactDuplicates(channels), [channels]);
+  const deleteExact = () => {
+    if (!exact.length || !window.confirm(`حذف ${exact.length} نسخة مكررة بنفس الرابط تمامًا؟ تُحفظ النسخة الأولى من كل قناة، ولا يمكن التراجع.`)) return;
+    void run(async () => {
+      setBulkBusy("جارٍ حذف النسخ المكررة…");
+      for (let i = 0; i < exact.length; i += 10) await Promise.all(exact.slice(i, i + 10).map((c) => api.deleteChannel(c.id).catch(() => undefined)));
+      setBulkBusy("");
+      await refresh();
+    });
+  };
+  const addAllLegal = () => void run(async () => {
+    try {
+      setBulkBusy("جارٍ إضافة كل قنوات الدليل المجاني (iptv-org)…");
+      const r = await api.importCatalog({}, "iptv-org · كل القنوات", 20000);
+      let added = r.added;
+      for (const p of LEGAL_PLAYLISTS) {
+        if (sources.some((x) => x.url === p.url)) continue;
+        setBulkBusy(`جارٍ إضافة ${p.name}…`);
+        const src = await api.addSource({ name: p.name, type: "m3u_url", url: p.url });
+        added += (await api.syncSource(src.id).catch(() => ({ added: 0 }))).added ?? 0;
+      }
+      setMsg(`تمت إضافة ${added.toLocaleString()} قناة جديدة (تم تخطي ${r.skipped.toLocaleString()} موجودة مسبقًا).`);
+      await refresh();
+    } finally { setBulkBusy(""); }
+  });
   const position = selected ? visible.findIndex((c) => c.id === selected.id) + 1 : 0;
   const zap = useCallback((step: number) => {
     if (!visible.length) return;
@@ -209,8 +257,10 @@ export function App() {
     for (const c of channels) if (!c.hidden && c.sourceId) n.set(c.sourceId, (n.get(c.sourceId) ?? 0) + 1);
     return n;
   }, [channels]);
-  useEffect(() => setLimit(200), [group, hits, country]);
-  useEffect(() => setCountry(""), [group]);
+  useEffect(() => setLimit(200), [group, hits, country, sub]);
+  useEffect(() => { setCountry(""); setSub(""); }, [group]);
+  useEffect(() => setSub(""), [country]);
+  useEffect(() => { try { localStorage.setItem("receiver.dedupe", dedupe ? "1" : "0"); } catch { /* ignore */ } }, [dedupe]);
   useEffect(() => {
     if (group.startsWith("src:") && sources.length > 0 && !sources.some((x) => `src:${x.id}` === group)) setGroup("all"); // the source was deleted
   }, [group, sources]);
@@ -295,6 +345,25 @@ export function App() {
                 )}
               </div>
             )}
+            {!hits && subGroups.length > 1 && (
+              <div className="groups subgroups" role="tablist" aria-label="المجموعات داخل النشاط">
+                <button role="tab" aria-selected={sub === ""} aria-pressed={sub === ""} onClick={() => setSub("")}>{lang === "ar" ? "كل المجموعات" : "All groups"} <small>{subGroups.length}</small></button>
+                {subGroups.length <= 30 ? subGroups.map(([g, n]) => (
+                  <button key={g} role="tab" aria-selected={sub === g} aria-pressed={sub === g} onClick={() => setSub(g)}>{g} <small>{n}</small></button>
+                )) : (
+                  <select aria-label="المجموعة" value={sub} onChange={(e) => setSub(e.target.value)}>
+                    <option value="">{lang === "ar" ? "اختر مجموعة…" : "Choose a group…"}</option>
+                    {subGroups.map(([g, n]) => <option key={g} value={g}>{g} ({n})</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+            <div className="bulkbar">
+              <label><input type="checkbox" checked={dedupe} onChange={(e) => setDedupe(e.target.checked)} /> {lang === "ar" ? "إخفاء المكررات" : "Hide duplicates"}{dedupe && hiddenDupes > 0 ? ` (${hiddenDupes})` : ""}</label>
+              {exact.length > 0 && <button type="button" disabled={!!bulkBusy} onClick={deleteExact}>🗑 {lang === "ar" ? `حذف النسخ المتطابقة نهائيًا (${exact.length})` : `Delete exact copies (${exact.length})`}</button>}
+              <button type="button" className="primary" disabled={!!bulkBusy} onClick={addAllLegal}>＋ {lang === "ar" ? "إضافة كل القنوات المجانية القانونية" : "Add all free legal channels"}</button>
+              {bulkBusy && <span className="hint" role="status">{bulkBusy}</span>}
+            </div>
             <ul>
               {visible.slice(0, limit).map((c, i) => (
                 <li key={c.id} className={selected?.id === c.id ? "active" : ""}>
