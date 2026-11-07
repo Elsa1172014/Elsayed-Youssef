@@ -169,12 +169,34 @@ describe("gemini provider", () => {
     }) as unknown as typeof fetch;
     const out = await geminiModel("k123", { fetchImpl }).complete("sys", "hello", 100);
     expect(out).toBe("مرحبا");
-    expect(seen!.url).toContain("generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent");
+    expect(seen!.url).toContain("generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent");
     expect(seen!.url).not.toContain("k123");
     expect(seen!.headers["x-goog-api-key"]).toBe("k123");
     expect(seen!.body.systemInstruction.parts[0].text).toBe("sys");
     expect(seen!.body.contents[0].parts[0].text).toBe("hello");
   });
+  it("falls through retired model ids (404) and remembers the one that works; webm audio goes as video/webm", async () => {
+    const urls: string[] = [];
+    let mime = "";
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      urls.push(url);
+      if (!url.includes("gemini-3.1-flash-lite")) return new Response("{}", { status: 404 });
+      const b = JSON.parse(String(init.body));
+      mime = b.contents[0].parts[0].inlineData?.mimeType ?? mime;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "نص" }] } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const m = geminiModel("k", { fetchImpl, model: "gemini-2.0-flash" });
+    expect(await m.complete("s", "u", 10)).toBe("نص");
+    expect(urls.map((u) => /models\/([^:]+)/.exec(u)![1])).toEqual(["gemini-2.0-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]);
+    urls.length = 0;
+    expect(await m.listen!("s", "AAAA", "audio/webm", 50)).toBe("نص");
+    expect(urls).toHaveLength(1); // straight to the remembered model
+    expect(mime).toBe("video/webm");
+    expect(m.modelId).toBe("gemini-3.1-flash-lite");
+    const none = geminiModel("k", { fetchImpl: (async () => new Response("{}", { status: 404 })) as unknown as typeof fetch });
+    await expect(none.complete("s", "u", 10)).rejects.toThrow("no available Gemini model");
+  });
+
   it("rejects on HTTP errors and empty candidates", async () => {
     const bad = (async () => new Response("{}", { status: 429 })) as unknown as typeof fetch;
     await expect(geminiModel("k", { fetchImpl: bad }).complete("s", "u", 10)).rejects.toThrow("HTTP 429");

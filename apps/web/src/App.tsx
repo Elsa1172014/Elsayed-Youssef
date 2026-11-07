@@ -7,7 +7,6 @@ import { SportsNewsView } from "./SportsNewsView";
 import { AiButton } from "./AiPanel";
 import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
-import { YouTubeView } from "./YouTubeView";
 import { WebSearchView } from "./WebSearchView";
 import { HubView } from "./HubView";
 import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
@@ -284,7 +283,7 @@ export function App() {
     <div className="app" dir={lang === "ar" ? "rtl" : "ltr"} lang={lang}>
       <header>
         <h1>Smart Receiver</h1>
-        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => setTab(x)}>{x === "hub" ? (lang === "ar" ? "🎬 الترفيه" : "🎬 Hub") : x === "web" ? (lang === "ar" ? "🔎 بحث" : "🔎 Search") : x === "youtube" ? "▶ YouTube" : x === "news" ? "⚽ الرياضة والأخبار" : s[x]}</button>)}</nav>
+        <nav>{tabs.map((x) => <button key={x} aria-pressed={tab === x} onClick={() => (x === "youtube" ? window.open("https://www.youtube.com", "_blank", "noopener") : setTab(x))}>{x === "hub" ? (lang === "ar" ? "🎬 الترفيه" : "🎬 Hub") : x === "web" ? (lang === "ar" ? "🔎 بحث" : "🔎 Search") : x === "youtube" ? "▶ YouTube" : x === "news" ? "⚽ الرياضة والأخبار" : s[x]}</button>)}</nav>
         <input
           type="search"
           name="channel-search"
@@ -408,7 +407,6 @@ export function App() {
       <div className="page">
         {tab === "hub" && <HubView onNavigate={setTab} channels={channels} refresh={refresh} />}
         {tab === "web" && <WebSearchView lang={lang} />}
-        {tab === "youtube" && <YouTubeView />}
         {tab === "news" && <><SportsView channels={channels} onPlay={(c) => { playChannel(c); setTab("live"); }} /><SportsNewsView /></>}
         {tab === "guide" && <GuideView channels={channels.filter((c) => !c.hidden)} />}
         {tab === "catalog" && <CatalogView s={s} run={run} refresh={refresh} />}
