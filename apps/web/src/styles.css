@@ -91,3 +91,10 @@ html.tv-mode{font-size:21px}html.tv-mode header{padding:18px 26px;gap:14px}html.
 @media(max-width:900px){.ctools-keys{display:none}}
 .subgroups{padding-top:6px;border-top:1px dashed #ffffff18}.subgroups button{font-size:.85rem;padding:3px 9px}
 .bulkbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0 10px;font-size:.9rem}.bulkbar label{display:flex;gap:6px;align-items:center}.bulkbar .primary{background:linear-gradient(120deg,#126db8,#249fe5);font-weight:600}
+/* Arabic subtitles */
+.player .subs{position:absolute;inset-inline:6%;bottom:64px;z-index:4;text-align:center;pointer-events:none;display:grid;gap:4px}
+.player .subs p{margin:0 auto;display:inline-block;max-width:100%;background:#000c;color:#fff;font-size:clamp(1rem,2.4vw,1.6rem);line-height:1.5;padding:4px 14px;border-radius:8px;text-shadow:0 1px 2px #000;font-family:"Segoe UI",Tahoma,"Noto Naskh Arabic",sans-serif}
+.player:fullscreen .subs p,.player.theater .subs p{font-size:clamp(1.4rem,3vw,2.4rem)}
+.player .subnote{position:absolute;top:8px;inset-inline-start:8px;margin:0;z-index:4;background:#0a233bee;color:#fff;padding:6px 10px;border-radius:8px;font-size:.85rem;max-width:70%}
+.player .fs .subbtn{font-weight:700;font-family:Tahoma,sans-serif}.player .fs .subbtn.on{background:#1774c5;border-color:#3abfff}
+html.tv-mode .player .subs p{font-size:2rem}

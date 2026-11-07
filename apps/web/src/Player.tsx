@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { detectStreamKind, type Engine, type StreamKind } from "./core";
 import { forgetSource, recallSource, startEngine, type Handle } from "./engine";
+import { findArabicTrack, showTrack, startLiveSubtitles } from "./subtitles";
 
 /** Asks the relay why it refused (offline, geo-blocked, ...) so the viewer sees a reason instead of a spinner. */
 async function relayReason(proxyUrl: string): Promise<string> {
@@ -29,6 +30,28 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
   const [via, setVia] = useState<"" | "direct" | "relay">("");
   const [tap, setTap] = useState(false);
   const [repaired, setRepaired] = useState(false);
+  // Arabic subtitles: remembered on this device, so they follow the viewer from channel to channel.
+  const [subsOn, setSubsOn] = useState(() => { try { return localStorage.getItem("receiver.subs") === "1"; } catch { return false; } });
+  const [subLines, setSubLines] = useState<string[]>([]);
+  const [subNote, setSubNote] = useState("");
+  const [playingNow, setPlayingNow] = useState(false);
+  useEffect(() => { try { localStorage.setItem("receiver.subs", subsOn ? "1" : "0"); } catch { /* ignore */ } }, [subsOn]);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || !subsOn || !playingNow) { setSubLines([]); setSubNote(""); if (video) showTrack(video, undefined); return; }
+    const track = findArabicTrack(video);
+    if (track) { showTrack(video, track); setSubNote("ترجمة عربية مدمجة في البث"); return () => showTrack(video, undefined); }
+    setSubNote("الترجمة الفورية تعمل… تظهر بعد ثوانٍ من الكلام");
+    let clearT: ReturnType<typeof setTimeout> | undefined;
+    const stop = startLiveSubtitles(video, (text) => {
+      if (!text) return;
+      setSubNote("");
+      setSubLines((l) => [...l, text].slice(-2));
+      clearTimeout(clearT);
+      clearT = setTimeout(() => setSubLines([]), 9000);
+    }, (m) => setSubNote(m));
+    return () => { stop(); clearTimeout(clearT); };
+  }, [subsOn, playingNow]);
   const pipOk = typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled;
   useEffect(() => { if (error) onFailed?.(); }, [error]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -50,6 +73,7 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
       });
     const onPlaying = () => {
       setTap(false);
+      setPlayingNow(true);
       onPlayingCb?.();
       clearTimeout(stall);
     };
@@ -135,8 +159,11 @@ export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb,
   return (
     <div className={theater ? "player theater" : "player"} ref={box}>
       <video ref={ref} controls autoPlay playsInline onDoubleClick={fullscreen} />
+      {subsOn && subLines.length > 0 && <div className="subs" dir="rtl" lang="ar" aria-live="polite">{subLines.map((l, i) => <p key={i}>{l}</p>)}</div>}
+      {subsOn && subNote && <p className="subnote" dir="rtl">{subNote}</p>}
       {tap && <button type="button" className="bigplay" onClick={() => { setTap(false); void ref.current?.play(); }}>▶ {playLabel}</button>}
       <div className="fs">
+        <button type="button" className={subsOn ? "subbtn on" : "subbtn"} aria-pressed={subsOn} onClick={() => setSubsOn((x) => !x)} title="ترجمة عربية" aria-label="ترجمة عربية">ع</button>
         {pipOk && <button type="button" onClick={pip} aria-label="Picture in picture" title="Picture in picture">⧉</button>}
         <button type="button" onClick={() => setTheater((t) => !t)} aria-label="Wide view" title="Wide view">▭</button>
         <button type="button" onClick={fullscreen} aria-label="Fullscreen" title="Fullscreen">⛶</button>

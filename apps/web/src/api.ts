@@ -192,6 +192,7 @@ export const api = {
     return { items: (await res.json()) as CatalogEntry[], total: Number(res.headers.get("x-total-count") ?? 0) };
   },
   facets: () => call<Facets>("/v1/catalog/facets"),
+  subtitle: (audio: string, mime: string, to: "ar" | "en" = "ar") => call<{ text: string }>("/v1/ai/subtitle", json("POST", { audio, mime, to })),
   stats: () => call<{ channels: number; sources: number; catalog: number }>("/v1/me/stats"),
   syncStatus: () => call<{ running: boolean; channels: number; lastSync: { at: string; channels: number; streams: number; premium: number } | null }>("/v1/catalog/sync"),
   syncNow: () => call<{ channels: number; streams: number; premium: number }>("/v1/catalog/sync", json("POST")),

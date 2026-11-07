@@ -125,6 +125,20 @@ describe("AI helpers", () => {
     expect((await app.inject({ method: "POST", url: "/v1/ai/translate", headers: bob, payload: { text: "hi", to: "ar" } })).statusCode).toBe(200);
   });
 
+  it("turns a short audio clip into an Arabic subtitle only with an audio-capable model", async () => {
+    const clipB64 = Buffer.from("fake-opus").toString("base64");
+    const textOnly = await makeApp({}, { model: { complete: async () => "x" } });
+    expect((await textOnly.app.inject({ method: "POST", url: "/v1/ai/subtitle", headers: alice, payload: { audio: clipB64, mime: "audio/webm;codecs=opus" } })).statusCode).toBe(503);
+    let seen = "";
+    const { app } = await makeApp({}, { model: { complete: async () => "x", listen: async (_s, _a, mime) => { seen = mime; return "مرحبًا بكم"; } } });
+    const ok = await app.inject({ method: "POST", url: "/v1/ai/subtitle", headers: alice, payload: { audio: clipB64, mime: "audio/webm;codecs=opus" } });
+    expect(ok.json()).toEqual({ text: "مرحبًا بكم" });
+    expect(seen).toBe("audio/webm");
+    expect((await app.inject({ method: "POST", url: "/v1/ai/subtitle", headers: alice, payload: { audio: clipB64, mime: "text/html" } })).statusCode).toBe(400);
+    const silent = await makeApp({}, { model: { complete: async () => "x", listen: async () => "-" } });
+    expect((await silent.app.inject({ method: "POST", url: "/v1/ai/subtitle", headers: alice, payload: { audio: clipB64, mime: "audio/mp4" } })).json()).toEqual({ text: "" });
+  });
+
   it("finds similar channels among the user's own", async () => {
     const { app } = await makeApp();
     const add = async (name: string, group: string) => (await app.inject({ method: "POST", url: "/v1/me/channels", headers: alice, payload: { name, group, streamUrl: `https://example.org/${name.length}${group}.m3u8` } })).json();

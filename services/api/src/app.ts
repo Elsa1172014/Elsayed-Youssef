@@ -5,7 +5,7 @@ import {
   identityName, looksLikeHlsManifest, matchOwnChannels, sameChannel, type ChannelIdentity, type Diagnosis, parseXtreamLive, rankStreams, recommend, searchChannels, serializeM3U, suggestEpgMappings, xtreamApiUrl, xtreamAuthOk,
   xtreamStreamTemplate, type M3UEntry,
 } from "@receiver/core";
-import { clip, EXPLAIN_SYSTEM, LANGS, plainSummary, SUMMARY_SYSTEM, TRANSLATE_SYSTEM, type Lang, type TextModel } from "./ai";
+import { clip, EXPLAIN_SYSTEM, LANGS, plainSummary, SUMMARY_SYSTEM, SUBTITLE_SYSTEM, TRANSLATE_SYSTEM, type Lang, type TextModel } from "./ai";
 import { AuthError, bearerToken, type AuthService, type Authenticator } from "./auth";
 import { AttemptLimiter } from "./rateLimit";
 import type { SecretBox } from "./crypto";
@@ -57,6 +57,7 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
   app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => (body === "" ? done(null, {}) : jsonParser(req, body as string, done)));
   const loginLimiter = new AttemptLimiter(5, 15 * 60_000, () => now().getTime());
   const aiLimiter = new AttemptLimiter(60, 3600_000, () => now().getTime()); // per user per hour: bounds model cost
+  const subtitleLimiter = new AttemptLimiter(1500, 3600_000, () => now().getTime()); // live subtitles: one short clip every ~6 s
   const registerLimiter = new AttemptLimiter(10, 60 * 60_000, () => now().getTime());
 
   app.addHook("onRequest", async (req, reply) => {
@@ -703,6 +704,25 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
       return { text: await model.complete(TRANSLATE_SYSTEM(langOf(b.to)), text, 800), to: langOf(b.to) };
     } catch {
       return bad(reply, "Translation failed, try again later", 502);
+    }
+  });
+
+  /** Live subtitles: a few seconds of the channel's audio in, one or two translated subtitle lines out. Audio is not stored. */
+  app.post("/v1/ai/subtitle", async (req, reply) => {
+    const uid = uidOf(req);
+    const b = body(req);
+    const audio = typeof b.audio === "string" ? b.audio : "";
+    const mime = typeof b.mime === "string" && /^audio\/(webm|ogg|mp4|mpeg|wav|aac)/.test(b.mime) ? b.mime.split(";")[0]! : "";
+    if (!audio || !mime || audio.length > 2_000_000 || !/^[A-Za-z0-9+/=]+$/.test(audio.slice(0, 200))) return bad(reply, "audio (base64) and an audio mime type are required");
+    if (!model?.listen) return bad(reply, "Live subtitles need GEMINI_API_KEY on the server", 503);
+    subtitleLimiter.fail(uid);
+    const wait = subtitleLimiter.blockedFor(uid);
+    if (wait) return reply.header("retry-after", wait).code(429).send({ error: "Subtitle limit reached for this hour" });
+    try {
+      const text = await model.listen(SUBTITLE_SYSTEM(langOf(b.to ?? "ar")), audio, mime, 200);
+      return { text: text === "-" || text === "—" ? "" : clip(text, 300) };
+    } catch {
+      return bad(reply, "Subtitle request failed", 502);
     }
   });
 
