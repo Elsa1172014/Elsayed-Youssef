@@ -1,4 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+const YT = "https://www.youtube.com";
+/** Opens YouTube itself (the YouTube app on phones) — normal search, no API key needed. */
+const openYouTube = (q?: string) => window.open(q ? `${YT}/results?search_query=${encodeURIComponent(q)}` : YT, "_blank", "noopener");
 
 type Video = { id: string; title: string; channel: string; thumbnail: string };
 function videoId(input: string): string | null {
@@ -17,11 +21,15 @@ export function YouTubeView() {
   const [results, setResults] = useState<Video[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // In-app results only when the server has a YouTube Data API key; otherwise search happens on YouTube itself.
+  const [inApp, setInApp] = useState(false);
+  useEffect(() => { void fetch("/api/youtube-search?q=").then((r) => setInApp(r.status !== 503 && r.status !== 404)).catch(() => setInApp(false)); }, []);
   async function search() {
     const term = input.trim();
-    if (!term) return;
+    if (!term) { openYouTube(); return; }
     const direct = videoId(term);
     if (direct) { setActive(direct); setError(""); return; }
+    if (!inApp) { openYouTube(term); return; } // synchronous: keeps the tap's user gesture so phones open the YouTube app
     setLoading(true); setError(""); setResults([]);
     try {
       const response = await fetch("/api/youtube-search?q=" + encodeURIComponent(term));
@@ -33,11 +41,12 @@ export function YouTubeView() {
     finally { setLoading(false); }
   }
   return <section dir="rtl" style={{maxWidth:1100,margin:"0 auto",padding:20}}>
-    <h2>▶ YouTube داخل Smart Receiver</h2>
-    <p>ابحث عن الفيديوهات أو ألصق رابط فيديو من YouTube لتشغيله هنا دون مغادرة المنصة.</p>
+    <h2>▶ YouTube</h2>
+    <button type="button" className="primary" onClick={() => openYouTube()} style={{fontSize:"1.15rem",padding:"14px 22px",margin:"4px 0 14px",background:"#e62117",borderColor:"#ff4d42",color:"#fff"}}>▶ فتح YouTube الآن</button>
+    <p>{inApp ? "ابحث هنا وشغّل الفيديو داخل المنصة، أو ألصق رابط فيديو." : "اكتب ما تبحث عنه فيُفتح YouTube بنتائج البحث مباشرة (تطبيق YouTube على الجوال). ولتشغيل فيديو داخل المنصة ألصق رابطه."}</p>
     <form onSubmit={e => { e.preventDefault(); void search(); }} style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <input aria-label="البحث في يوتيوب أو رابط فيديو" value={input} onChange={e=>setInput(e.target.value)} placeholder="ابحث في YouTube أو ألصق رابط الفيديو" style={{flex:"1 1 250px",minWidth:0,padding:12}} />
-      <button type="submit" disabled={loading}>{loading ? "جارٍ البحث…" : "بحث / تشغيل"}</button>
+      <button type="submit" disabled={loading}>{loading ? "جارٍ البحث…" : inApp ? "بحث / تشغيل" : "🔎 بحث في YouTube"}</button>
     </form>
     {error && <p role="alert">{error}</p>}
     {active && <div style={{marginTop:20,aspectRatio:"16 / 9",width:"100%",maxWidth:900}}>

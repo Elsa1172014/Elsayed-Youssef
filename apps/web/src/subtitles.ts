@@ -116,3 +116,36 @@ export function startLiveSubtitles(video: HTMLVideoElement, onText: (text: strin
     void audioCtx?.close().catch(() => undefined);
   };
 }
+
+/**
+ * Server-side live subtitles (HLS): the server reads the segment being watched and translates its audio.
+ * Works on every device, including iPhone/Safari. Resolves "fallback" when the stream needs the in-browser method.
+ */
+export function startServerSubtitles(channelId: string, onText: (text: string) => void, onError: (message: string) => void, onFallback: () => void): () => void {
+  let stopped = false;
+  let after: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const r = await api.subtitleLive(channelId, after);
+      if (stopped) return;
+      failures = 0;
+      if (r.seq !== undefined) after = r.seq;
+      if (r.text) onText(r.text);
+      timer = setTimeout(() => void tick(), Math.max(1, r.wait ?? 4) * 1000);
+    } catch (e) {
+      if (stopped) return;
+      const m = (e as Error).message;
+      if (/not an HLS|no supported audio|unreachable|no playable/i.test(m)) { stopped = true; onFallback(); return; }
+      if (/encrypted/i.test(m)) { stopped = true; onError("هذه القناة مشفّرة، ولا تُترجم لأن صوتها محمي."); return; }
+      if (/limit|429/i.test(m)) { stopped = true; onError("انتهى حدّ الترجمة لهذه الساعة. حاول لاحقًا."); return; }
+      if (/GEMINI|503/i.test(m)) { stopped = true; onError("الترجمة تحتاج مفتاح Gemini على الخادم."); return; }
+      if (++failures >= 3) { stopped = true; onError("تعذّرت الترجمة لهذه القناة الآن."); return; }
+      timer = setTimeout(() => void tick(), 4000);
+    }
+  };
+  void tick();
+  return () => { stopped = true; clearTimeout(timer); };
+}

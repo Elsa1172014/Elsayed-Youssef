@@ -1,5 +1,7 @@
 import { IPTV_ORG_API, syncIptvOrg } from "./jobs/catalog";
 import { registerHub, type Hub } from "./hub";
+import { isMaster as isMasterPlaylist, parseMedia as parseMediaPlaylist, pickSegment, pickVariant } from "./subtitles/hls";
+import { extractTsAudio } from "./subtitles/tsAudio";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   assertPublicHttpUrl, fillCredentials, parseHdHomeRunLineup, parseOpenWebifServices, receiverEndpoint, fuseRankings, hashingEmbedder, mergeProgrammes, nearest, parseM3U, parseXmltv,
@@ -780,6 +782,76 @@ export function buildApp({ store, auth, authenticate, secrets, fetcher, opener =
     try {
       const text = await model.listen(SUBTITLE_SYSTEM(langOf(b.to ?? "ar")), audio, mime, 200);
       return { text: text === "-" || text === "—" ? "" : clip(text, 300) };
+    } catch {
+      return bad(reply, "Subtitle request failed", 502);
+    }
+  });
+
+  /**
+   * Server-side live subtitles for HLS channels: the server reads the segment the viewer is watching, extracts its audio
+   * (MPEG-TS → AAC/MP3, or fMP4 as-is) and Gemini transcribes + translates it. Works on every device, including iPhone.
+   * Encrypted/DRM streams are not decrypted: they get a clear "unsupported" answer instead.
+   */
+  app.post("/v1/me/channels/:id/subtitle-live", async (req, reply) => {
+    const uid = uidOf(req);
+    const b = body(req);
+    if (!model?.listen) return bad(reply, "Live subtitles need GEMINI_API_KEY on the server", 503);
+    const ch = await store.getChannel(uid, (req.params as { id: string }).id);
+    if (!ch) return bad(reply, "Not found", 404);
+    const after = typeof b.after === "number" && Number.isInteger(b.after) && b.after >= 0 ? b.after : undefined;
+    const unsupported = (why: string) => reply.code(422).send({ error: why, fallback: "client" });
+    const readAll = async (url: string, max: number): Promise<Buffer> => {
+      const r = await opener(url, { signal: AbortSignal.timeout(12_000) });
+      if (r.status < 200 || r.status >= 300 || !r.body) throw new Error(`HTTP ${r.status}`);
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const reader = r.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > max) { await reader.cancel(); throw new Error("segment too large"); }
+        chunks.push(Buffer.from(value));
+      }
+      return Buffer.concat(chunks);
+    };
+    let playlistUrl = await resolveStream(uid, ch);
+    let media;
+    try {
+      let text = (await readAll(playlistUrl, 2_000_000)).toString("utf8");
+      if (!text.trimStart().startsWith("#EXTM3U")) return unsupported("not an HLS stream");
+      if (isMasterPlaylist(text)) {
+        const v = pickVariant(text, playlistUrl);
+        if (!v) return unsupported("no playable variant");
+        playlistUrl = v;
+        text = (await readAll(playlistUrl, 2_000_000)).toString("utf8");
+      }
+      media = parseMediaPlaylist(text, playlistUrl);
+    } catch (e) {
+      return unsupported(`stream unreachable from the server (${(e as Error).message})`);
+    }
+    if (media.encrypted) return unsupported("encrypted stream: not decrypted");
+    const seg = pickSegment(media, after);
+    if (!seg) return { text: "", seq: after, wait: Math.max(1, Math.round(media.targetDuration / 2)) };
+    subtitleLimiter.fail(uid);
+    const waitFor = subtitleLimiter.blockedFor(uid);
+    if (waitFor) return reply.header("retry-after", waitFor).code(429).send({ error: "Subtitle limit reached for this hour" });
+    let audio: { data: Buffer; mime: string } | undefined;
+    try {
+      if (media.map) {
+        const init = await readAll(media.map, 2_000_000);
+        const data = Buffer.concat([init, await readAll(seg.url, 12_000_000)]);
+        audio = { data, mime: "video/mp4" };
+      } else {
+        audio = extractTsAudio(await readAll(seg.url, 12_000_000));
+      }
+    } catch (e) {
+      return unsupported(`segment unreachable (${(e as Error).message})`);
+    }
+    if (!audio) return unsupported("no supported audio track in this stream");
+    try {
+      const text = await model.listen(SUBTITLE_SYSTEM(langOf(b.to ?? "ar")), audio.data.toString("base64"), audio.mime, 200);
+      return { text: text === "-" || text === "—" ? "" : clip(text, 300), seq: seg.seq, duration: seg.duration, wait: Math.max(1, Math.round(seg.duration * 0.8)) };
     } catch {
       return bad(reply, "Subtitle request failed", 502);
     }
