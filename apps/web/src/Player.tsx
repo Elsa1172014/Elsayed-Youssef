@@ -21,7 +21,7 @@ const defaultEngine = (kind: StreamKind): Engine => (kind === "dash" ? "dashjs" 
  * signed relay (mixed content / missing CORS). If the AI "Repair & Play" found a better source for this channel on
  * this device, that remembered source is tried first. A browser that blocks autoplay gets a clear Play button.
  */
-export function Player({ channelId, onWatched, relayLabel = "via server", relayTip = "", playLabel = "Play", fixedLabel = "" }: { channelId: string; onWatched: (seconds: number) => void; relayLabel?: string; relayTip?: string; playLabel?: string; fixedLabel?: string }) {
+export function Player({ channelId, onWatched, onFailed, onPlaying: onPlayingCb, relayLabel = "via server", relayTip = "", playLabel = "Play", fixedLabel = "" }: { channelId: string; onWatched: (seconds: number) => void; onFailed?: () => void; onPlaying?: () => void; relayLabel?: string; relayTip?: string; playLabel?: string; fixedLabel?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [theater, setTheater] = useState(false);
@@ -29,6 +29,8 @@ export function Player({ channelId, onWatched, relayLabel = "via server", relayT
   const [via, setVia] = useState<"" | "direct" | "relay">("");
   const [tap, setTap] = useState(false);
   const [repaired, setRepaired] = useState(false);
+  const pipOk = typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled;
+  useEffect(() => { if (error) onFailed?.(); }, [error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const video = ref.current;
@@ -48,6 +50,7 @@ export function Player({ channelId, onWatched, relayLabel = "via server", relayT
       });
     const onPlaying = () => {
       setTap(false);
+      onPlayingCb?.();
       clearTimeout(stall);
     };
     // Long buffering: restart loading a couple of times, never in a loop.
@@ -116,6 +119,12 @@ export function Player({ channelId, onWatched, relayLabel = "via server", relayT
     else if (v?.webkitEnterFullscreen) v.webkitEnterFullscreen(); // iPhone Safari only fullscreens the <video>
     else setTheater((t) => !t);
   };
+  const pip = () => {
+    const v = ref.current;
+    if (!v) return;
+    if (document.pictureInPictureElement) void document.exitPictureInPicture().catch(() => undefined);
+    else void v.requestPictureInPicture().catch(() => undefined);
+  };
   useEffect(() => {
     if (!theater) return;
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setTheater(false);
@@ -128,6 +137,7 @@ export function Player({ channelId, onWatched, relayLabel = "via server", relayT
       <video ref={ref} controls autoPlay playsInline onDoubleClick={fullscreen} />
       {tap && <button type="button" className="bigplay" onClick={() => { setTap(false); void ref.current?.play(); }}>▶ {playLabel}</button>}
       <div className="fs">
+        {pipOk && <button type="button" onClick={pip} aria-label="Picture in picture" title="Picture in picture">⧉</button>}
         <button type="button" onClick={() => setTheater((t) => !t)} aria-label="Wide view" title="Wide view">▭</button>
         <button type="button" onClick={fullscreen} aria-label="Fullscreen" title="Fullscreen">⛶</button>
       </div>

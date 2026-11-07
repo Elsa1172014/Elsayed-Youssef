@@ -9,6 +9,8 @@ import { CatalogView, GuideView, ManageView, PremiumView } from "./views";
 import { SignIn } from "./SignIn";
 import { YouTubeView } from "./YouTubeView";
 import { GROUP_ORDER, groupCounts, groupsOf, type GroupId } from "./groups";
+import { ChannelTools } from "./ChannelTools";
+import { alternativesFor, clearRecent, loadFavs, loadRecent, pushRecent, saveFavs } from "./tools";
 
 type Tab = "live" | "youtube" | "news" | "guide" | "catalog" | "premium" | "manage";
 
@@ -28,7 +30,12 @@ export function App() {
   const [nowNext, setNowNext] = useState<NowNext>({});
   const [selected, setSelected] = useState<Channel | null>(null);
   const [playNonce, setPlayNonce] = useState(0); // bumps to restart the player when the AI repair found a better source
-  const playChannel = useCallback((c: Channel) => { setSelected(c); setPlayNonce((n) => n + 1); }, []);
+  const [favs, setFavs] = useState<string[]>(loadFavs);
+  const [recent, setRecent] = useState<string[]>(loadRecent);
+  const [failed, setFailed] = useState(false);
+  const [numBuf, setNumBuf] = useState("");
+  const playChannel = useCallback((c: Channel) => { setSelected(c); setFailed(false); setPlayNonce((n) => n + 1); }, []);
+  const toggleFav = useCallback((id: string) => setFavs((f) => { const n = f.includes(id) ? f.filter((x) => x !== id) : [id, ...f]; saveFavs(n); return n; }), []);
   const [query, setQuery] = useState("");
   const [showAudit, setShowAudit] = useState(false);
   const [health, setHealth] = useState<Record<string, { status: string; detail: string }>>({});
@@ -135,9 +142,9 @@ export function App() {
       await Promise.all(channels.slice(i, i + 3).map(async (c) => {
         try {
           const d = await api.diagnose(c.id);
-          const detail = JSON.stringify(d);
-          const outcome = String(d.outcome ?? "").toLowerCase();
-          const status = /playing|playable|success/.test(outcome) ? "تعمل" : /unavailable|failed|offline/.test(outcome) ? "فشل" : "غير مؤكدة";
+          const why: Record<string, string> = { invalid_url: "رابط غير صالح", auth_required: "يتطلب تسجيل دخول", forbidden: "محظور أو انتهت صلاحية الرمز", geo_blocked: "محجوب جغرافيًا", gone: "الرابط غير موجود (404)", rate_limited: "طلبات كثيرة", server_error: "خطأ في خادم البث", timeout: "انتهت المهلة", network: "تعذّر الاتصال", not_media: "الرابط لا يحتوي بثًا", no_media_data: "البث بلا مقاطع", drm_protected: "محمي بـ DRM", codec_unsupported: "ترميز غير مدعوم في المتصفح", player_error: "خطأ في المشغّل" };
+          const detail = `${why[d.cause] ?? d.cause}${d.httpStatus ? ` · HTTP ${d.httpStatus}` : ""}${d.latencyMs ? ` · ${d.latencyMs}ms` : ""}${d.accountProblem ? " · مشكلة في الاشتراك" : ""}`;
+          const status = d.ok ? "تعمل" : d.accountProblem || ["invalid_url", "gone", "not_media", "no_media_data", "server_error", "network"].includes(d.cause) ? "فشل" : "غير مؤكدة";
           results[c.id] = { status, detail: detail.slice(0, 350) };
         } catch (e) { results[c.id] = { status: "غير مؤكدة", detail: (e as Error).message }; }
       }));
@@ -146,12 +153,48 @@ export function App() {
     }
     setHealthBusy(false);
   };
-  const inGroup = (c: Channel, g: string) => (g === "all" ? true : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
+  const inGroup = (c: Channel, g: string) => (g === "all" ? true : g === "fav" ? favs.includes(c.id) : g === "recent" ? recent.includes(c.id) : g.startsWith("src:") ? c.sourceId === g.slice(4) : groupsOf(c).includes(g as GroupId));
   const visible = useMemo(() => {
     const list = channels.filter((c) => !c.hidden);
     if (hits) return hits.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c);
-    return list.filter((c) => inGroup(c, group) && (!country || c.country === country));
-  }, [channels, hits, group, country]);
+    const ordered = group === "recent" ? recent.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c) : group === "fav" ? favs.map((id) => list.find((c) => c.id === id)).filter((c): c is Channel => !!c) : list;
+    return ordered.filter((c) => inGroup(c, group) && (!country || c.country === country));
+  }, [channels, hits, group, country, favs, recent]);
+  const position = selected ? visible.findIndex((c) => c.id === selected.id) + 1 : 0;
+  const zap = useCallback((step: number) => {
+    if (!visible.length) return;
+    const i = selected ? visible.findIndex((c) => c.id === selected.id) : -1;
+    const next = visible[(i + step + visible.length) % visible.length];
+    if (next) { playChannel(next); setLimit((l) => Math.max(l, ((i + step + visible.length) % visible.length) + 1)); }
+  }, [visible, selected, playChannel]);
+  const alternatives = useMemo(() => (selected ? alternativesFor(selected, channels) : []), [selected, channels]);
+  // Keyboard / TV-remote zapping. Ignored while typing in a field.
+  useEffect(() => {
+    if (tab !== "live") return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key;
+      if (k === "PageDown" || k === "ChannelDown" || k === "MediaTrackNext" || (k === "ArrowDown" && !!selected && el?.tagName !== "BUTTON")) { e.preventDefault(); zap(1); }
+      else if (k === "PageUp" || k === "ChannelUp" || k === "MediaTrackPrevious" || (k === "ArrowUp" && !!selected && el?.tagName !== "BUTTON")) { e.preventDefault(); zap(-1); }
+      else if (/^[0-9]$/.test(k)) setNumBuf((b) => (b + k).slice(-4));
+      else if ((k === "f" || k === "F") && selected) toggleFav(selected.id);
+      else if ((k === "r" || k === "R") && selected) playChannel(selected);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, zap, selected, toggleFav, playChannel]);
+  // Number entry: after a short pause jump to that position in the current list (like a TV remote).
+  useEffect(() => {
+    if (!numBuf) return;
+    const t = setTimeout(() => {
+      const c = visible[Number(numBuf) - 1];
+      if (c) { playChannel(c); setLimit((l) => Math.max(l, Number(numBuf))); }
+      setNumBuf("");
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [numBuf, visible, playChannel]);
   // Countries present in the chosen group (so "Europe" can be narrowed to France, Germany, ...), with counts.
   const countries = useMemo(() => {
     const n = new Map<string, number>();
@@ -220,7 +263,7 @@ export function App() {
                   {healthBusy && <progress value={healthProgress} max={channels.length || 1} style={{width:"100%"}} />}
                   <p>تم فحص {Object.keys(health).length} من {channels.length} قناة · تعمل: {Object.values(health).filter(x=>x.status==="تعمل").length} · فشل: {Object.values(health).filter(x=>x.status==="فشل").length} · غير مؤكدة: {Object.values(health).filter(x=>x.status==="غير مؤكدة").length}</p>
                   <div style={{maxHeight:320,overflowY:"auto"}}>
-                    {channels.filter(c=>health[c.id] && health[c.id].status!=="تعمل").slice(0,200).map(c=><p key={c.id}><strong>{c.name}</strong> — {health[c.id].status} — {health[c.id].detail}</p>)}
+                    {channels.filter(c=>health[c.id] && health[c.id]?.status!=="تعمل").slice(0,200).map(c=><p key={c.id}><strong>{c.name}</strong> — {health[c.id]?.status} — {health[c.id]?.detail}</p>)}
                   </div>
                 </section>
                 {audit.sameUrl.slice(0, 15).map((g, i) => <p key={"url"+i}>رابط مكرر ({g.length}): {g.map((c) => c.name).join("، ")}</p>)}
@@ -236,6 +279,9 @@ export function App() {
                     {s[`g_${g}` as keyof typeof s]} <small>{counts[g]}</small>
                   </button>
                 ))}
+                <button role="tab" aria-selected={group === "fav"} aria-pressed={group === "fav"} onClick={() => setGroup("fav")}>★ {lang === "ar" ? "المفضلة" : "Favourites"} <small>{favs.length}</small></button>
+                <button role="tab" aria-selected={group === "recent"} aria-pressed={group === "recent"} onClick={() => setGroup("recent")}>🕘 {lang === "ar" ? "شوهدت مؤخرًا" : "Recent"} <small>{recent.length}</small></button>
+                {group === "recent" && recent.length > 0 && <button onClick={() => { clearRecent(); setRecent([]); }}>{lang === "ar" ? "مسح السجل" : "Clear"}</button>}
                 {sources.filter((src) => src.type !== "xmltv").map((src) => (
                   <button key={src.id} className="srcchip" role="tab" aria-selected={group === `src:${src.id}`} aria-pressed={group === `src:${src.id}`} onClick={() => { setGroup(`src:${src.id}`); }} title={sourceCounts.get(src.id) ? undefined : s.emptySource}>
                     ▤ {src.name} <small>{sourceCounts.get(src.id) ?? 0}</small>
@@ -250,14 +296,15 @@ export function App() {
               </div>
             )}
             <ul>
-              {visible.slice(0, limit).map((c) => (
+              {visible.slice(0, limit).map((c, i) => (
                 <li key={c.id} className={selected?.id === c.id ? "active" : ""}>
                   <div className="rowwrap">
-                    <button className="row" onClick={() => setSelected(c)}>
-                      <strong>{c.name}</strong>
+                    <span className="chnum">{i + 1}</span>
+                    <button className="row" onClick={() => playChannel(c)}>
+                      <strong>{favs.includes(c.id) ? "★ " : ""}{c.name}</strong>
                       <small>{nowNext[c.id]?.now ? (nowNext[c.id]!.now as { title: string }).title : c.group ?? ""}</small>
                     </button>
-                    <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={(x) => setSelected(x)} onPlayed={playChannel} onNavigate={setTab} />
+                    <AiButton s={s} lang={lang} channel={c} channels={channels} onPick={(x) => playChannel(x)} onPlayed={playChannel} onNavigate={setTab} />
                   </div>
                 </li>
               ))}
@@ -267,7 +314,9 @@ export function App() {
           <section className="main">
             {selected ? (
               <>
-                <Player key={`${selected.id}:${playNonce}`} relayLabel={s.viaRelay} relayTip={s.viaRelayTip} playLabel={s.playBtn} fixedLabel={s.aiFixed} channelId={selected.id} onWatched={(sec) => void api.watch(selected.id, sec).catch(() => undefined)} />
+                <Player key={`${selected.id}:${playNonce}`} onFailed={() => setFailed(true)} onPlaying={() => { setFailed(false); setRecent(pushRecent(selected.id)); }} relayLabel={s.viaRelay} relayTip={s.viaRelayTip} playLabel={s.playBtn} fixedLabel={s.aiFixed} channelId={selected.id} onWatched={(sec) => void api.watch(selected.id, sec).catch(() => undefined)} />
+                {numBuf && <div className="numosd" aria-live="polite">{numBuf}</div>}
+                <ChannelTools lang={lang} channel={selected} position={position} total={visible.length} isFav={favs.includes(selected.id)} alternatives={alternatives} failed={failed} onPrev={() => zap(-1)} onNext={() => zap(1)} onToggleFav={() => toggleFav(selected.id)} onReload={() => playChannel(selected)} onPlay={playChannel} />
                 <h2>{selected.name}</h2>
                 <p>{s.now}: {nowNext[selected.id]?.now?.title ?? "—"} · {s.next}: {nowNext[selected.id]?.next?.title ?? "—"}</p>
               </>
